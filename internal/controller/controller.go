@@ -185,9 +185,9 @@ func (c *Controller) updateDownloadDir(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 var (
-	promptStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#4f46e5", Dark: "#7aa2f7"})
+	promptStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#c2410c", Dark: "#ff9e64"})
 	placeholderStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#94a3b8", Dark: "#565f89"})
-	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#9333ea", Dark: "#bb9af7"})
+	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#c2410c", Dark: "#ff9e64"})
 )
 
 func newInput(placeholder string, plain bool) textinput.Model {

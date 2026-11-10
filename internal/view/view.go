@@ -82,22 +82,22 @@ const (
 )
 
 var (
-	accent  = lipgloss.AdaptiveColor{Light: "#4f46e5", Dark: "#7aa2f7"}
-	accent2 = lipgloss.AdaptiveColor{Light: "#9333ea", Dark: "#bb9af7"}
-	muted   = lipgloss.AdaptiveColor{Light: "#64748b", Dark: "#737aa2"}
-	faint   = lipgloss.AdaptiveColor{Light: "#94a3b8", Dark: "#3b4261"}
-	good    = lipgloss.AdaptiveColor{Light: "#15803d", Dark: "#9ece6a"}
-	bad     = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f7768e"}
-	amber   = lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#e0af68"}
-	paper   = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1a1b26"}
+	accent = lipgloss.AdaptiveColor{Light: "#4f46e5", Dark: "#7aa2f7"}
+	orange = lipgloss.AdaptiveColor{Light: "#c2410c", Dark: "#ff9e64"}
+	muted  = lipgloss.AdaptiveColor{Light: "#64748b", Dark: "#737aa2"}
+	faint  = lipgloss.AdaptiveColor{Light: "#94a3b8", Dark: "#3b4261"}
+	good   = lipgloss.AdaptiveColor{Light: "#15803d", Dark: "#9ece6a"}
+	bad    = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f7768e"}
+	amber  = lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#e0af68"}
+	paper  = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1a1b26"}
 
 	brandSt   = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	frameSt   = lipgloss.NewStyle().Foreground(faint)
 	activeSt  = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	doneSt    = lipgloss.NewStyle().Foreground(good)
 	mutedSt   = lipgloss.NewStyle().Foreground(muted)
-	labelSt   = lipgloss.NewStyle().Bold(true).Foreground(accent2)
-	barSt     = lipgloss.NewStyle().Foreground(accent)
+	labelSt   = lipgloss.NewStyle().Bold(true).Foreground(orange)
+	barSt     = lipgloss.NewStyle().Foreground(orange)
 	errorSt   = lipgloss.NewStyle().Foreground(bad)
 	successSt = lipgloss.NewStyle().Bold(true).Foreground(good)
 	extSt     = lipgloss.NewStyle().Bold(true).Foreground(accent)
