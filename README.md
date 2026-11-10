@@ -144,3 +144,7 @@ go test -short ./...   # quick suite
   flows (`internal/controller/testdata`) and the `-list` output (`internal/cli/testdata`). After an
   *intended* change, regenerate them with `go test ./... -run Golden -update` and
   review the diff.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
