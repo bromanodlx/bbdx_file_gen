@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"bbdx_file_gen/internal/model"
 	"bbdx_file_gen/internal/view"
@@ -149,12 +150,21 @@ func (c *Controller) updateDownloadDir(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return c, c.edit(&c.dlInput, msg)
 }
 
+var (
+	promptStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#4f46e5", Dark: "#7aa2f7"})
+	placeholderStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#94a3b8", Dark: "#565f89"})
+	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#9333ea", Dark: "#bb9af7"})
+)
+
 func newInput(placeholder string) textinput.Model {
 	ti := textinput.New()
-	ti.Prompt = "> "
+	ti.Prompt = "❯ "
+	ti.PromptStyle = promptStyle
+	ti.PlaceholderStyle = placeholderStyle
 	ti.Placeholder = placeholder
 	ti.CharLimit = 4096
 	ti.Cursor.SetMode(cursor.CursorStatic)
+	ti.Cursor.Style = cursorStyle
 	return ti
 }
 

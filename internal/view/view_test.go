@@ -195,3 +195,54 @@ func TestRenderEICARNote(t *testing.T) {
 		t.Errorf("an ordinary file must not mention EICAR:\n%s", plain)
 	}
 }
+
+func TestRenderDrawsAFramedCard(t *testing.T) {
+	out := render(State{Step: StepName, Input: "> report", Width: 74})
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	top, bottom := lines[0], ""
+	for _, l := range lines {
+		if strings.HasPrefix(l, "╰") {
+			bottom = l
+		}
+	}
+	if !strings.HasPrefix(top, "╭") || !strings.Contains(top, "bbdx_file_gen") {
+		t.Errorf("top border missing brand: %q", top)
+	}
+	if bottom == "" {
+		t.Errorf("no bottom border:\n%s", out)
+	}
+	// every framed line is flush to the same width
+	var boxed []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰") {
+			boxed = append(boxed, l)
+		}
+	}
+	w := ansi.StringWidth(boxed[0])
+	for _, l := range boxed {
+		if got := ansi.StringWidth(l); got != w {
+			t.Errorf("ragged frame: line width %d != %d: %q", got, w, l)
+		}
+	}
+}
+
+func TestRenderNeverExceedsWidthAcrossSteps(t *testing.T) {
+	steps := []State{
+		{Step: StepName, Input: "> x"},
+		{Step: StepExt, Name: "report", Input: "> p", Suggestions: []Suggestion{{Ext: "docx", Name: "Office Open XML word processing document", Category: "Documents", MinSize: "1.2 KiB", Selected: true}}, MoreSuggestions: 9},
+		{Step: StepSize, FormatName: "Portable Network Graphics", TargetPath: "/very/long/path/to/a/report.png", MinSize: "70 B", MinBytes: 70, SizeNote: "RIFF files are even", Hint: "tab: use 72"},
+		{Step: StepLocation, TargetPath: "report.pdf", CurrentDir: "/home/user/a/very/long/project/directory/path", DownloadDir: "/home/user/Downloads", EICAR: true},
+		{Step: StepDone, TargetPath: "/tmp/x.png", SizeLabel: "1 KiB", Bytes: 1024, FormatName: "PNG"},
+		{Step: StepDownloadDir, Input: "> ~/Downloads", DownloadReason: "No standard download directory is configured yet.", Error: "x"},
+	}
+	for _, w := range []int{40, 60, 80} {
+		for _, s := range steps {
+			s.Width = w
+			for _, line := range strings.Split(Render(s), "\n") {
+				if got := ansi.StringWidth(line); got > w {
+					t.Errorf("width %d, step %v: line is %d cells: %q", w, s.Step, got, ansi.Strip(line))
+				}
+			}
+		}
+	}
+}
