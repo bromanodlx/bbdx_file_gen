@@ -767,3 +767,66 @@ func TestNonEICARNameStillAsksForSize(t *testing.T) {
 	h.key(tea.KeyEnter)
 	h.expectStep(view.StepSize)
 }
+
+// --- plain mode ---
+
+func newPlainHarness(t *testing.T) *harness {
+	t.Helper()
+	dl := t.TempDir()
+	store := &memStore{cfg: model.Config{DownloadDir: dl}}
+	dir, home := t.TempDir(), t.TempDir()
+	c := New(&model.Service{Registry: model.Default()}, Setup{
+		Current: dir, Home: home, Suggested: filepath.Join(home, "Downloads"), Store: store, Plain: true,
+	})
+	h := &harness{t: t, c: c, store: store, dir: dir, home: home, downloads: dl}
+	h.run(h.c.Init())
+	return h
+}
+
+func asciiOnly(t *testing.T, label, s string) {
+	t.Helper()
+	for _, r := range s {
+		if r > 0x7e || (r < 0x20 && r != '\n') {
+			t.Errorf("%s has non-ASCII rune %q", label, r)
+			return
+		}
+	}
+}
+
+func TestPlainModeFlagsStateAndAsciiInput(t *testing.T) {
+	h := newPlainHarness(t)
+	if !h.c.State().Plain {
+		t.Error("State.Plain must be true in plain mode")
+	}
+	asciiOnly(t, "name prompt", h.c.nameInput.Prompt)
+	asciiOnly(t, "download prompt", h.c.dlInput.Prompt)
+	for _, f := range h.c.spinner {
+		asciiOnly(t, "spinner frame", f)
+	}
+	asciiOnly(t, "rendered view", ansiStrip(h.c.View()))
+}
+
+func TestPlainModeRendersWholeFlowAsAscii(t *testing.T) {
+	h := newPlainHarness(t)
+	h.typ("report")
+	h.key(tea.KeyEnter)
+	h.typ("p")
+	asciiOnly(t, "type screen", h.c.View())
+	h.typ("df")
+	h.key(tea.KeyEnter)
+	asciiOnly(t, "size screen", h.c.View())
+	h.key(tea.KeyEnter)
+	asciiOnly(t, "location screen", h.c.View())
+	h.typ("y")
+	h.expectStep(view.StepDone)
+	asciiOnly(t, "done screen", h.c.View())
+}
+
+func TestDefaultModeIsNotPlain(t *testing.T) {
+	h := newHarness(t)
+	if h.c.State().Plain {
+		t.Error("default mode must not be plain")
+	}
+}
+
+func ansiStrip(s string) string { return ansi.Strip(s) }

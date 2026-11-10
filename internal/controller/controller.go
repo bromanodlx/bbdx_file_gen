@@ -22,7 +22,10 @@ import (
 
 const visibleSuggestions = 8
 
-var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+var (
+	spinnerFrames      = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+	spinnerFramesASCII = []string{"|", "/", "-", "\\"}
+)
 
 type (
 	generatedMsg struct {
@@ -44,12 +47,16 @@ type Setup struct {
 	Home      string // expands ~ in paths
 	Suggested string // proposal shown when no download directory is configured
 	Store     Settings
+	Plain     bool // ASCII-only glyphs and no color
 }
 
 // Controller holds the wizard state.
 type Controller struct {
 	svc   *model.Service
 	setup Setup
+
+	plain   bool
+	spinner []string
 
 	step                           view.Step
 	nameInput, extInput, sizeInput textinput.Model
@@ -81,13 +88,21 @@ type Controller struct {
 // New creates a controller that generates files through svc. If no reachable
 // standard download directory is configured, it starts by asking for one.
 func New(svc *model.Service, setup Setup) *Controller {
+	placeholder := "pdf, png, docx, …"
+	spinner := spinnerFrames
+	if setup.Plain {
+		placeholder = "pdf, png, docx, ..."
+		spinner = spinnerFramesASCII
+	}
 	c := &Controller{
 		svc:       svc,
 		setup:     setup,
-		nameInput: newInput("report"),
-		extInput:  newInput("pdf, png, docx, …"),
-		sizeInput: newInput(""),
-		dlInput:   newInput("~/Downloads"),
+		plain:     setup.Plain,
+		spinner:   spinner,
+		nameInput: newInput("report", setup.Plain),
+		extInput:  newInput(placeholder, setup.Plain),
+		sizeInput: newInput("", setup.Plain),
+		dlInput:   newInput("~/Downloads", setup.Plain),
 		suggest:   -1,
 	}
 	c.refreshMatches()
@@ -156,15 +171,21 @@ var (
 	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#9333ea", Dark: "#bb9af7"})
 )
 
-func newInput(placeholder string) textinput.Model {
+func newInput(placeholder string, plain bool) textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = "❯ "
 	ti.PromptStyle = promptStyle
 	ti.PlaceholderStyle = placeholderStyle
+	ti.Cursor.Style = cursorStyle
+	if plain {
+		ti.Prompt = "> "
+		ti.PromptStyle = lipgloss.NewStyle()
+		ti.PlaceholderStyle = lipgloss.NewStyle()
+		ti.Cursor.Style = lipgloss.NewStyle()
+	}
 	ti.Placeholder = placeholder
 	ti.CharLimit = 4096
 	ti.Cursor.SetMode(cursor.CursorStatic)
-	ti.Cursor.Style = cursorStyle
 	return ti
 }
 
@@ -511,9 +532,9 @@ func (c *Controller) State() view.State {
 		Step: c.step, Width: c.width, Height: c.height,
 		Name: strings.TrimSpace(c.nameInput.Value()), Error: c.errMsg,
 		Ext: c.format.Ext, FormatName: c.format.Name, TargetPath: c.target,
-		Spinner:    spinnerFrames[c.frame%len(spinnerFrames)],
+		Spinner:    c.spinner[c.frame%len(c.spinner)],
 		CurrentDir: c.setup.Current, DownloadDir: c.downloads, LocationYes: c.locYes,
-		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar,
+		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar, Plain: c.plain,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note

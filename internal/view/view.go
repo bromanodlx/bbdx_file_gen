@@ -4,6 +4,8 @@
 // Everything is drawn inside a single rounded "card" whose width tracks the
 // terminal. The brand sits in the top edge, a progress rail and the active
 // step's fields fill the body, and keycap-styled shortcuts run underneath.
+// In plain mode the glyphs fall back to ASCII and all color is stripped, for
+// terminals without Unicode or ANSI support.
 package view
 
 import (
@@ -40,6 +42,7 @@ type Suggestion struct {
 type State struct {
 	Step          Step
 	Width, Height int
+	Plain         bool // ASCII-only glyphs and no color
 
 	Input string // the rendered text input of the active step
 
@@ -104,34 +107,65 @@ var (
 	eicarSt   = lipgloss.NewStyle().Foreground(amber)
 )
 
+// glyphs is the character set used to draw the frame and markers.
+type glyphs struct {
+	tl, tr, bl, br, h, v         string // card corners, horizontal, vertical
+	bar, done, active, pending   string // headings and the progress rail
+	sel, warn, gear, arrow, hint string // markers
+	sep, dash, ell               string // middle dot, em dash, truncation tail
+}
+
+var unicodeGlyphs = glyphs{
+	tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│",
+	bar: "▍", done: "✓", active: "●", pending: "○",
+	sel: "▸", warn: "⚠", gear: "⚙", arrow: "→", hint: "➜",
+	sep: "·", dash: "—", ell: "…",
+}
+
+var asciiGlyphs = glyphs{
+	tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|",
+	bar: "|", done: "v", active: "*", pending: "o",
+	sel: ">", warn: "!", gear: "*", arrow: "->", hint: "->",
+	sep: "-", dash: "-", ell: "...",
+}
+
 // Render draws the whole screen.
 func Render(s State) string {
+	g := unicodeGlyphs
+	if s.Plain {
+		g = asciiGlyphs
+	}
 	total := frameWidth(s.Width)
 	inner := total - 4 // two border cells and one space of padding per side
 
 	var body []string
 	if s.Step == StepDownloadDir {
-		body = append(body, activeSt.Render("⚙  Settings"))
+		body = append(body, activeSt.Render(g.gear+"  Settings"))
 	} else {
-		body = append(body, rail(s.Step, inner))
+		body = append(body, rail(s.Step, inner, g))
 	}
 	body = append(body, "")
-	body = append(body, section(s, inner)...)
+	body = append(body, section(s, inner, g)...)
 	if s.Error != "" {
-		body = append(body, "", errorSt.Render("✗ "+s.Error))
+		body = append(body, "", errorSt.Render(g.warn+" "+s.Error))
 	}
 	if s.Hint != "" {
-		body = append(body, activeSt.Render("➜ "+s.Hint))
+		body = append(body, activeSt.Render(g.hint+" "+s.Hint))
 	}
 
 	var b strings.Builder
-	b.WriteString(topBorder(total) + "\n")
+	b.WriteString(topBorder(total, g) + "\n")
 	for _, line := range body {
-		b.WriteString(bodyLine(line, inner) + "\n")
+		b.WriteString(bodyLine(line, inner, g) + "\n")
 	}
-	b.WriteString(bottomBorder(total) + "\n\n")
-	b.WriteString(helpBlock(s, total))
-	return fit(b.String(), s.Width)
+	b.WriteString(bottomBorder(total, g) + "\n\n")
+	b.WriteString(helpBlock(s, total, g))
+
+	out := fit(b.String(), s.Width, g.ell)
+	if s.Plain {
+		out = ansi.Strip(out)
+	}
+	return out
 }
 
 func frameWidth(w int) int {
@@ -148,10 +182,10 @@ func frameWidth(w int) int {
 }
 
 // section returns the body lines for the active step.
-func section(s State, inner int) []string {
+func section(s State, inner int, g glyphs) []string {
 	switch s.Step {
 	case StepDownloadDir:
-		lines := []string{heading("Standard download directory", "")}
+		lines := []string{heading("Standard download directory", "", g)}
 		for _, r := range strings.Split(s.DownloadReason, "\n") {
 			if strings.TrimSpace(r) != "" {
 				lines = append(lines, mutedSt.Render(r))
@@ -164,50 +198,50 @@ func section(s State, inner int) []string {
 		)
 	case StepName:
 		return []string{
-			heading("File name", ""),
+			heading("File name", "", g),
 			s.Input,
 			mutedSt.Render("The name of the file to create; may include a directory."),
 		}
 	case StepExt:
-		lines := []string{heading("File type", "for "+s.Name), s.Input, ""}
-		return append(lines, suggestionRows(s, inner)...)
+		lines := []string{heading("File type", "for "+s.Name, g), s.Input, ""}
+		return append(lines, suggestionRows(s, inner, g)...)
 	case StepSize:
 		lines := []string{
-			heading("Size", s.FormatName+" → "+s.TargetPath),
+			heading("Size", s.FormatName+" "+g.arrow+" "+s.TargetPath, g),
 			s.Input,
 			mutedSt.Render(fmt.Sprintf("Empty = minimum standard-compliant size: %s (%d bytes).", s.MinSize, s.MinBytes)),
-			mutedSt.Render("Units: B · KB/MB/GB ×1000 · KiB/MiB/GiB (or K/M/G) ×1024"),
+			mutedSt.Render("Units: B " + g.sep + " KB/MB/GB x1000 " + g.sep + " KiB/MiB/GiB (or K/M/G) x1024"),
 		}
 		if s.SizeNote != "" {
 			lines = append(lines, eicarSt.Render("Note: "+s.SizeNote))
 		}
 		return lines
 	case StepLocation:
-		lines := []string{heading("Location", "for "+s.TargetPath)}
+		lines := []string{heading("Location", "for "+s.TargetPath, g)}
 		if s.EICAR {
-			lines = append(lines, eicarSt.Render("⚠ EICAR anti-malware test file — 68 bytes, the smallest possible."))
+			lines = append(lines, eicarSt.Render(g.warn+" EICAR anti-malware test file "+g.dash+" 68 bytes, the smallest possible."))
 		}
 		return append(lines,
 			"Create the file in the current directory?",
 			"",
-			choiceRow(s.LocationYes, "Yes", s.CurrentDir, inner),
-			choiceRow(!s.LocationYes, "No ", s.DownloadDir+"  (download folder)", inner),
+			choiceRow(s.LocationYes, "Yes", s.CurrentDir, inner, g),
+			choiceRow(!s.LocationYes, "No ", s.DownloadDir+"  (download folder)", inner, g),
 		)
 	case StepConfirm:
 		return []string{
-			errorSt.Render("⚠ " + s.TargetPath + " already exists."),
+			errorSt.Render(g.warn + " " + s.TargetPath + " already exists."),
 			"",
 			"Overwrite it?  " + activeSt.Render("[y/N]"),
 		}
 	case StepGenerating:
-		return []string{activeSt.Render(s.Spinner+" ") + "Generating " + s.TargetPath + mutedSt.Render("  ·  "+s.SizeLabel+" …")}
+		return []string{activeSt.Render(s.Spinner+" ") + "Generating " + s.TargetPath + mutedSt.Render("  "+g.sep+"  "+s.SizeLabel+" "+g.ell)}
 	case StepDone:
 		lines := []string{
-			successSt.Render("✓ Created ") + s.TargetPath,
-			mutedSt.Render(fmt.Sprintf("  %s · %s (%d bytes)", s.FormatName, s.SizeLabel, s.Bytes)),
+			successSt.Render(g.done+" Created ") + s.TargetPath,
+			mutedSt.Render(fmt.Sprintf("  %s "+g.sep+" %s (%d bytes)", s.FormatName, s.SizeLabel, s.Bytes)),
 		}
 		if s.EICAR {
-			lines = append(lines, eicarSt.Render("  EICAR test file — scanners will flag it; this is expected."))
+			lines = append(lines, eicarSt.Render("  EICAR test file "+g.dash+" scanners will flag it; this is expected."))
 		}
 		return lines
 	}
@@ -215,8 +249,8 @@ func section(s State, inner int) []string {
 }
 
 // heading renders an accent-barred section title with an optional muted note.
-func heading(title, note string) string {
-	h := barSt.Render("▍") + labelSt.Render(title)
+func heading(title, note string, g glyphs) string {
+	h := barSt.Render(g.bar) + labelSt.Render(title)
 	if note != "" {
 		h += mutedSt.Render("  " + note)
 	}
@@ -225,68 +259,69 @@ func heading(title, note string) string {
 
 // rail draws the four-step progress breadcrumb, collapsing to a compact badge
 // when the full form would not fit.
-func rail(cur Step, inner int) string {
+func rail(cur Step, inner int, g glyphs) string {
 	names := []string{"Name", "Type", "Size", "Location"}
 	segs := make([]string, len(names))
 	for i, n := range names {
 		switch {
 		case Step(i) < cur:
-			segs[i] = doneSt.Render("✓ " + n)
+			segs[i] = doneSt.Render(g.done + " " + n)
 		case Step(i) == cur:
-			segs[i] = activeSt.Render(fmt.Sprintf("● %d %s", i+1, n))
+			segs[i] = activeSt.Render(fmt.Sprintf("%s %d %s", g.active, i+1, n))
 		default:
-			segs[i] = mutedSt.Render(fmt.Sprintf("○ %d %s", i+1, n))
+			segs[i] = mutedSt.Render(fmt.Sprintf("%s %d %s", g.pending, i+1, n))
 		}
 	}
-	full := strings.Join(segs, frameSt.Render(" ─ "))
+	full := strings.Join(segs, frameSt.Render(" "+g.h+" "))
 	if ansi.StringWidth(full) <= inner {
 		return full
 	}
 	if int(cur) < len(names) {
-		return activeSt.Render(fmt.Sprintf("● %d %s", cur+1, names[cur])) + mutedSt.Render(fmt.Sprintf("  ·  step %d of 4", cur+1))
+		return activeSt.Render(fmt.Sprintf("%s %d %s", g.active, cur+1, names[cur])) +
+			mutedSt.Render(fmt.Sprintf("  %s  step %d of 4", g.sep, cur+1))
 	}
-	return doneSt.Render("✓ all steps complete")
+	return doneSt.Render(g.done + " all steps complete")
 }
 
 // suggestionRows renders the filterable file-type list, right-aligning each
 // row's category and minimum size and highlighting the selected entry.
-func suggestionRows(s State, inner int) []string {
+func suggestionRows(s State, inner int, g glyphs) []string {
 	if len(s.Suggestions) == 0 {
 		return []string{mutedSt.Render("  no matching file type — keep typing")}
 	}
 	out := make([]string, 0, len(s.Suggestions)+1)
 	for _, sg := range s.Suggestions {
 		ext := fmt.Sprintf("%-5s", sg.Ext)
-		meta := sg.Category + " · min " + sg.MinSize
+		meta := sg.Category + " " + g.sep + " min " + sg.MinSize
 		if sg.Selected {
-			left := "▸ " + ext + "  " + sg.Name
-			out = append(out, selectSt.Render(pad(left, meta, inner)))
+			left := g.sel + " " + ext + "  " + sg.Name
+			out = append(out, selectSt.Render(pad(left, meta, inner, g.ell)))
 			continue
 		}
 		left := "  " + extSt.Render(ext) + "  " + sg.Name
 		out = append(out, padStyled(left, mutedSt.Render(meta), inner))
 	}
 	if s.MoreSuggestions > 0 {
-		out = append(out, mutedSt.Render(fmt.Sprintf("  … %d more, keep typing to narrow", s.MoreSuggestions)))
+		out = append(out, mutedSt.Render(fmt.Sprintf("  %s %d more, keep typing to narrow", g.ell, s.MoreSuggestions)))
 	}
 	return out
 }
 
 // choiceRow renders one option of the location question.
-func choiceRow(selected bool, label, dir string, inner int) string {
+func choiceRow(selected bool, label, dir string, inner int, g glyphs) string {
 	if selected {
-		return selectSt.Render(cell("▸ "+label+"  → "+dir, inner))
+		return selectSt.Render(cell(g.sel+" "+label+"  "+g.arrow+" "+dir, inner, g.ell))
 	}
-	return "  " + label + mutedSt.Render("  → "+dir)
+	return "  " + label + mutedSt.Render("  "+g.arrow+" "+dir)
 }
 
 // pad joins a plain left and right segment flush to width w.
-func pad(left, right string, w int) string {
+func pad(left, right string, w int, ell string) string {
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 2 {
-		return cell(left+"  "+right, w)
+		return cell(left+"  "+right, w, ell)
 	}
-	return cell(left+strings.Repeat(" ", gap)+right, w)
+	return cell(left+strings.Repeat(" ", gap)+right, w, ell)
 }
 
 // padStyled is pad for already-styled (ANSI-bearing) segments.
@@ -300,33 +335,33 @@ func padStyled(left, right string, w int) string {
 
 // --- frame ---
 
-func topBorder(total int) string {
+func topBorder(total int, g glyphs) string {
 	label := brandSt.Render("bbdx_file_gen")
 	tag := "standard-compliant test files"
 	if 5+ansi.StringWidth(label)+3+len(tag)+1 <= total {
 		label += "  " + tagSt.Render(tag)
 	}
 	if lw := ansi.StringWidth(label); lw > total-6 {
-		label = ansi.Truncate(label, total-6, "…")
+		label = ansi.Truncate(label, total-6, g.ell)
 	}
 	dashes := total - 5 - ansi.StringWidth(label)
 	if dashes < 1 {
 		dashes = 1
 	}
-	return frameSt.Render("╭─ ") + label + frameSt.Render(" "+strings.Repeat("─", dashes)+"╮")
+	return frameSt.Render(g.tl+g.h+" ") + label + frameSt.Render(" "+strings.Repeat(g.h, dashes)+g.tr)
 }
 
-func bottomBorder(total int) string {
-	return frameSt.Render("╰" + strings.Repeat("─", total-2) + "╯")
+func bottomBorder(total int, g glyphs) string {
+	return frameSt.Render(g.bl + strings.Repeat(g.h, total-2) + g.br)
 }
 
-func bodyLine(content string, inner int) string {
-	return frameSt.Render("│") + " " + cell(content, inner) + " " + frameSt.Render("│")
+func bodyLine(content string, inner int, g glyphs) string {
+	return frameSt.Render(g.v) + " " + cell(content, inner, g.ell) + " " + frameSt.Render(g.v)
 }
 
 // --- help ---
 
-func helpBlock(s State, total int) string {
+func helpBlock(s State, total int, g glyphs) string {
 	lines := wrapItems(helpItems(s), total)
 	rendered := make([]string, len(lines))
 	for i, items := range lines {
@@ -334,26 +369,30 @@ func helpBlock(s State, total int) string {
 		for j, it := range items {
 			caps[j] = kbd(it)
 		}
-		rendered[i] = "  " + strings.Join(caps, frameSt.Render(" · "))
+		rendered[i] = "  " + strings.Join(caps, frameSt.Render(" "+g.sep+" "))
 	}
 	return strings.Join(rendered, "\n")
 }
 
 func helpItems(s State) []string {
 	const dl = "ctrl+d download dir"
+	up, lr, wait := "↑/↓ choose", "←/→ choose", "please wait…"
+	if s.Plain {
+		up, lr, wait = "up/down choose", "left/right choose", "please wait..."
+	}
 	switch s.Step {
 	case StepName:
 		return []string{"enter next", dl, "esc/ctrl+c quit"}
 	case StepExt:
-		return []string{"enter select", "tab complete", "↑/↓ choose", "esc back", dl, "ctrl+c quit"}
+		return []string{"enter select", "tab complete", up, "esc back", dl, "ctrl+c quit"}
 	case StepSize:
 		return []string{"enter next", "tab apply suggestion", "esc back", dl, "ctrl+c quit"}
 	case StepLocation:
-		return []string{"y/n answer", "←/→ choose", "enter confirm", "esc back", dl, "ctrl+c quit"}
+		return []string{"y/n answer", lr, "enter confirm", "esc back", dl, "ctrl+c quit"}
 	case StepConfirm:
 		return []string{"y overwrite", "n/esc back"}
 	case StepGenerating:
-		return []string{"please wait…"}
+		return []string{wait}
 	case StepDownloadDir:
 		if s.DownloadCancel {
 			return []string{"enter save", "tab complete", "esc cancel", "ctrl+c quit"}
@@ -375,7 +414,7 @@ func kbd(item string) string {
 
 // wrapItems greedily packs items (joined by " · ") into lines of width <= total.
 func wrapItems(items []string, total int) [][]string {
-	const sep = 3 // " · "
+	const sep = 3 // " X "
 	avail := total - 2
 	var lines [][]string
 	var cur []string
@@ -401,26 +440,26 @@ func wrapItems(items []string, total int) [][]string {
 }
 
 // cell truncates content to w cells and right-pads it to exactly w.
-func cell(s string, w int) string {
+func cell(s string, w int, ell string) string {
 	if w < 0 {
 		w = 0
 	}
-	s = ansi.Truncate(s, w, "…")
-	if g := w - ansi.StringWidth(s); g > 0 {
-		s += strings.Repeat(" ", g)
+	s = ansi.Truncate(s, w, ell)
+	if gap := w - ansi.StringWidth(s); gap > 0 {
+		s += strings.Repeat(" ", gap)
 	}
 	return s
 }
 
 // fit truncates every line to width cells (0 = unlimited) as a final guard.
-func fit(s string, width int) string {
+func fit(s string, width int, ell string) string {
 	if width <= 0 {
 		return s
 	}
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
 		if ansi.StringWidth(l) > width {
-			lines[i] = ansi.Truncate(l, width, "…")
+			lines[i] = ansi.Truncate(l, width, ell)
 		}
 	}
 	return strings.Join(lines, "\n")

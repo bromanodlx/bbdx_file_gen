@@ -246,3 +246,63 @@ func TestRenderNeverExceedsWidthAcrossSteps(t *testing.T) {
 		}
 	}
 }
+
+func nonASCII(s string) (rune, bool) {
+	for _, r := range s {
+		if r > 0x7e || (r < 0x20 && r != '\n') {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+func TestRenderPlainModeIsAsciiAndColorless(t *testing.T) {
+	states := []State{
+		{Step: StepName, Input: "> report"},
+		{Step: StepExt, Name: "report", Input: "> p", Suggestions: []Suggestion{
+			{Ext: "pdf", Name: "Portable Document Format", Category: "Documents", MinSize: "595 B", Selected: true},
+			{Ext: "png", Name: "Portable Network Graphics", Category: "Images", MinSize: "70 B"},
+		}, MoreSuggestions: 4},
+		{Step: StepSize, FormatName: "PNG", TargetPath: "report.png", MinSize: "70 B", MinBytes: 70, Hint: "tab: use 72"},
+		{Step: StepLocation, TargetPath: "eicar.zip", CurrentDir: "/a", DownloadDir: "/b", EICAR: true},
+		{Step: StepConfirm, TargetPath: "/tmp/x.png"},
+		{Step: StepGenerating, TargetPath: "big.zip", Spinner: "|", SizeLabel: "1 GiB"},
+		{Step: StepDone, TargetPath: "/tmp/x.png", SizeLabel: "1 KiB", Bytes: 1024, FormatName: "PNG"},
+		{Step: StepDownloadDir, Input: "> ~/dl", DownloadReason: "No standard download directory is configured yet."},
+	}
+	for _, s := range states {
+		s.Plain = true
+		s.Width = 70
+		out := Render(s)
+		if strings.ContainsRune(out, 0x1b) {
+			t.Errorf("step %v: plain output still contains ANSI escapes", s.Step)
+		}
+		if r, bad := nonASCII(out); bad {
+			t.Errorf("step %v: plain output has non-ASCII rune %q:\n%s", s.Step, r, out)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if len(line) > 70 {
+				t.Errorf("step %v: line exceeds 70 cells: %q", s.Step, line)
+			}
+		}
+	}
+}
+
+func TestRenderPlainKeepsContentAndUsesAsciiFrame(t *testing.T) {
+	out := Render(State{Step: StepName, Plain: true, Input: "> report", Width: 70})
+	for _, want := range []string{"bbdx_file_gen", "Name", "File name", "> report", "+", "|", "-"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plain output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.ContainsAny(out, "╭│●❯▍") {
+		t.Errorf("plain output must not use box-drawing glyphs:\n%s", out)
+	}
+}
+
+func TestRenderDefaultStaysUnicode(t *testing.T) {
+	out := Render(State{Step: StepName, Input: "> report", Width: 70})
+	if !strings.ContainsRune(out, '╭') {
+		t.Errorf("default mode must keep the rounded frame:\n%s", out)
+	}
+}

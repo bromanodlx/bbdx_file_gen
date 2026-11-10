@@ -21,6 +21,7 @@ func main() {
 	list := flag.Bool("list", false, "list supported file types and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	setDownloads := flag.String("download-dir", "", "set the standard download directory (absolute or relative path) and exit")
+	plain := flag.Bool("plain", false, "ASCII-only, no-color interface for basic terminals")
 	flag.Parse()
 
 	reg := model.Default()
@@ -56,9 +57,13 @@ func main() {
 		return
 	}
 
+	// Fall back to the plain interface on request, or for terminals that opt
+	// out of color (NO_COLOR) or cannot render ANSI (TERM=dumb).
+	plainMode := *plain || os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb"
+
 	suggested, _ := model.SuggestDownloadDir() // only a proposal for the setup screen
 	ctrl := controller.New(&model.Service{Registry: reg}, controller.Setup{
-		Current: cwd, Home: home, Suggested: suggested, Store: store,
+		Current: cwd, Home: home, Suggested: suggested, Store: store, Plain: plainMode,
 	})
 	if _, err := tea.NewProgram(ctrl, tea.WithAltScreen()).Run(); err != nil {
 		fail(err)
