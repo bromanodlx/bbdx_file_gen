@@ -199,30 +199,44 @@ func TestRenderEICARNote(t *testing.T) {
 func TestRenderDrawsAFramedCard(t *testing.T) {
 	out := render(State{Step: StepName, Input: "> report", Width: 74})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	top, bottom := lines[0], ""
-	for _, l := range lines {
-		if strings.HasPrefix(l, "╰") {
-			bottom = l
-		}
-	}
-	if !strings.HasPrefix(top, "╭") || !strings.Contains(top, "bbdx_file_gen") {
-		t.Errorf("top border missing brand: %q", top)
-	}
-	if bottom == "" {
-		t.Errorf("no bottom border:\n%s", out)
-	}
-	// every framed line is flush to the same width
+	var top, bottom string
 	var boxed []string
 	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "╭"):
+			top = l
+		case strings.HasPrefix(l, "╰"):
+			bottom = l
+		}
 		if strings.HasPrefix(l, "│") || strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "╰") {
 			boxed = append(boxed, l)
 		}
+	}
+	if top == "" || bottom == "" {
+		t.Fatalf("card is missing its top or bottom border:\n%s", out)
 	}
 	w := ansi.StringWidth(boxed[0])
 	for _, l := range boxed {
 		if got := ansi.StringWidth(l); got != w {
 			t.Errorf("ragged frame: line width %d != %d: %q", got, w, l)
 		}
+	}
+}
+
+func TestRenderShowsFigletBanner(t *testing.T) {
+	out := render(State{Step: StepName, Input: "> report", Width: 74})
+	for _, row := range Banner {
+		if !strings.Contains(out, row) {
+			t.Errorf("banner row missing: %q\n%s", row, out)
+		}
+	}
+	// the banner falls back to plain text when it will not fit
+	narrow := render(State{Step: StepName, Input: "> x", Width: 30})
+	if strings.Contains(narrow, Banner[0]) {
+		t.Errorf("banner must collapse at narrow widths:\n%s", narrow)
+	}
+	if !strings.Contains(narrow, "bbdx_file_gen") {
+		t.Errorf("narrow fallback must still name the tool:\n%s", narrow)
 	}
 }
 

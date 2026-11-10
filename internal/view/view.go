@@ -92,7 +92,6 @@ var (
 	paper   = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1a1b26"}
 
 	brandSt   = lipgloss.NewStyle().Bold(true).Foreground(accent)
-	tagSt     = lipgloss.NewStyle().Foreground(muted).Italic(true)
 	frameSt   = lipgloss.NewStyle().Foreground(faint)
 	activeSt  = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	doneSt    = lipgloss.NewStyle().Foreground(good)
@@ -106,6 +105,35 @@ var (
 	keySt     = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	eicarSt   = lipgloss.NewStyle().Foreground(amber)
 )
+
+// Banner is "bbdx" in the FIGlet "Standard" font, one string per row.
+var Banner = func() []string {
+	b := []string{" _     ", "| |__  ", "| '_ \\ ", "| |_) |", "|_.__/ "}
+	d := []string{"     _ ", "  __| |", " / _` |", "| (_| |", " \\__,_|"}
+	x := []string{"      ", "__  __", "\\ \\/ /", " >  < ", "/_/\\_\\"}
+	rows := make([]string, len(b))
+	for i := range rows {
+		rows[i] = b[i] + b[i] + d[i] + x[i]
+	}
+	return rows
+}()
+
+// bannerBlock renders the FIGlet banner and subtitle, falling back to a plain
+// wordmark when the art would not fit the card.
+func bannerBlock(inner int, g glyphs) []string {
+	var out []string
+	if ansi.StringWidth(Banner[0]) <= inner {
+		for _, row := range Banner {
+			out = append(out, brandSt.Render(row))
+		}
+	} else {
+		out = append(out, brandSt.Render("bbdx_file_gen"))
+	}
+	return append(out,
+		mutedSt.Render("bbdx_file_gen "+g.dash+" standard-compliant test files"),
+		"",
+	)
+}
 
 // glyphs is the character set used to draw the frame and markers.
 type glyphs struct {
@@ -138,7 +166,7 @@ func Render(s State) string {
 	total := frameWidth(s.Width)
 	inner := total - 4 // two border cells and one space of padding per side
 
-	var body []string
+	body := bannerBlock(inner, g)
 	if s.Step == StepDownloadDir {
 		body = append(body, activeSt.Render(g.gear+"  Settings"))
 	} else {
@@ -336,19 +364,7 @@ func padStyled(left, right string, w int) string {
 // --- frame ---
 
 func topBorder(total int, g glyphs) string {
-	label := brandSt.Render("bbdx_file_gen")
-	tag := "standard-compliant test files"
-	if 5+ansi.StringWidth(label)+3+len(tag)+1 <= total {
-		label += "  " + tagSt.Render(tag)
-	}
-	if lw := ansi.StringWidth(label); lw > total-6 {
-		label = ansi.Truncate(label, total-6, g.ell)
-	}
-	dashes := total - 5 - ansi.StringWidth(label)
-	if dashes < 1 {
-		dashes = 1
-	}
-	return frameSt.Render(g.tl+g.h+" ") + label + frameSt.Render(" "+strings.Repeat(g.h, dashes)+g.tr)
+	return frameSt.Render(g.tl + strings.Repeat(g.h, total-2) + g.tr)
 }
 
 func bottomBorder(total int, g glyphs) string {

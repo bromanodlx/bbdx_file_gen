@@ -64,7 +64,7 @@ Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The 
 | Layer | Package | Responsibility |
 |---|---|---|
 | **Model** | `internal/model` | Domain logic with no UI code. `Format` (metadata, `SizeRule`, streaming writer), `Registry` (lookup by extension or alias, prefix search), `Service` (validation, atomic file creation), configuration (download directory, bash-like path resolution and completion), size parsing, and the 50 generators grouped by family in `formats_*.go`. |
-| **View** | `internal/view` | `Render(State) string` and `RenderList`. Pure functions with no state and no model access. The UI is a single rounded "card": the brand sits in the top border, a progress rail tracks the four steps, the selected list row and location choice are highlighted, and keycap-styled shortcuts wrap underneath. It tracks the terminal width and degrades gracefully (compact rail, ellipsized rows) down to ~30 columns, and has an ASCII-only, colorless plain mode. |
+| **View** | `internal/view` | `Render(State) string` and `RenderList`. Pure functions with no state and no model access. The UI is a single rounded "card": a FIGlet "bbdx" banner heads the card, a progress rail tracks the four steps, the selected list row and location choice are highlighted, and keycap-styled shortcuts wrap underneath. It tracks the terminal width and degrades gracefully (compact rail, ellipsized rows) down to ~30 columns, and has an ASCII-only, colorless plain mode. |
 | **Controller** | `internal/controller` | Implements Bubble Tea's `tea.Model`. Translates key presses into model calls, runs generation asynchronously with a spinner, and builds the `view.State`. |
 
 `main.go` only wires the three together.
