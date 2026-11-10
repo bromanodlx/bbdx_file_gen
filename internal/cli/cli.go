@@ -17,7 +17,7 @@ import (
 )
 
 // Version is the release of the tool.
-const Version = "1.3.0"
+const Version = "1.4.0"
 
 // startTUI runs the interactive wizard; tests replace it.
 var startTUI = func(ctrl *controller.Controller) error {
