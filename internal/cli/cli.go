@@ -1,5 +1,5 @@
-// Package cli is the command line shared by the bbdx_file_gen and bbdxfg
-// commands: flag parsing, the non-interactive actions and starting the TUI.
+// Package cli is the bbdxfg command line: flag parsing, the non-interactive
+// actions and starting the TUI.
 package cli
 
 import (
@@ -11,12 +11,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"bbdx_file_gen/internal/controller"
-	"bbdx_file_gen/internal/model"
-	"bbdx_file_gen/internal/view"
+	"github.com/bromanodlx/bbdx_file_gen/internal/controller"
+	"github.com/bromanodlx/bbdx_file_gen/internal/model"
+	"github.com/bromanodlx/bbdx_file_gen/internal/view"
 )
 
-// Version is the release of the tool, whichever command name starts it.
+// Version is the release of the tool.
 const Version = "1.2.0"
 
 // startTUI runs the interactive wizard; tests replace it.
@@ -25,10 +25,12 @@ var startTUI = func(ctrl *controller.Controller) error {
 	return err
 }
 
-// Run executes the command line of the command called name and returns the
-// process exit code: 0 on success, 1 on a runtime error, 2 on a usage error.
-// Usage and error messages use name, so "bbdxfg" reports itself as bbdxfg.
-func Run(name string, args []string, stdout, stderr io.Writer) int {
+// name prefixes usage and error messages.
+const name = view.Command
+
+// Run executes the command line and returns the process exit code: 0 on
+// success, 1 on a runtime error, 2 on a usage error.
+func Run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	list := fs.Bool("list", false, "list supported file types and exit")
@@ -52,7 +54,7 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 	reg := model.Default()
 	switch {
 	case *showVersion:
-		fmt.Fprintln(stdout, "bbdx_file_gen", Version)
+		fmt.Fprintln(stdout, name, Version)
 		return 0
 	case *list:
 		fmt.Fprint(stdout, view.RenderList(controller.ListRows(reg)))

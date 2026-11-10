@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"bbdx_file_gen/internal/model"
+	"github.com/bromanodlx/bbdx_file_gen/internal/model"
 )
 
 // update regenerates the golden file: go test ./internal/controller -run Golden -update

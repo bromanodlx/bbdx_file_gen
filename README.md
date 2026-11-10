@@ -1,6 +1,6 @@
 # bbdx_file_gen
 
-A terminal UI for creating **standard-compliant test files** of an exact size.
+`bbdxfg` is a terminal UI for creating **standard-compliant test files** of an exact size.
 It asks four questions:
 
 1. **Name**: the file name, which may include a directory, e.g. `uploads/report`.
@@ -30,7 +30,7 @@ input is prefilled with a suggestion from your desktop settings (`user-dirs.dirs
 but nothing is saved until you confirm.
 
 - **Change it any time:** press `ctrl+d` on any wizard screen (you return to where
-  you were, inputs intact), or run `bbdx_file_gen -download-dir PATH`.
+  you were, inputs intact), or run `bbdxfg -download-dir PATH`.
 - **Paths work like in bash:** absolute (`/data/dl`), relative to the current
   directory (`dl`, `../dl`), `~`, `$VARS`/`${VARS}`, `"double"`/`'single'` quotes and
   `\ ` escapes. `tab` completes directory names. Relative input is stored as an
@@ -40,14 +40,19 @@ but nothing is saved until you confirm.
 ## Build & run
 
 ```sh
-go build -o bbdx_file_gen .      # full name
-go build -o bbdxfg ./cmd/bbdxfg  # short name, the same tool
-go install . ./cmd/bbdxfg        # or install both into $GOBIN / ~/go/bin
-./bbdx_file_gen          # interactive TUI (or just: bbdxfg)
-./bbdx_file_gen -list    # print all supported types with their minimum sizes
-./bbdx_file_gen -download-dir ~/Downloads   # set the standard download directory
-./bbdx_file_gen -plain   # ASCII-only, no-color interface for basic terminals
+go install github.com/bromanodlx/bbdx_file_gen/cmd/bbdxfg@latest  # into $GOBIN / ~/go/bin
+go build ./cmd/bbdxfg    # or build ./bbdxfg from a checkout
+bbdxfg                   # interactive TUI
+bbdxfg -list             # print all supported types with their minimum sizes
+bbdxfg -download-dir ~/Downloads   # set the standard download directory
+bbdxfg -plain            # ASCII-only, no-color interface for basic terminals
+bbdxfg -version
 ```
+
+Prebuilt binaries for Linux, macOS and Windows are on the
+[releases page](https://github.com/bromanodlx/bbdx_file_gen/releases).
+Up to 1.2.0 the tool was also installed as `bbdx_file_gen`; that name is gone, and
+the configuration (still under `bbdx_file_gen/`) carries over unchanged.
 
 Keys: `enter` next · `esc` back · `tab` complete the type, or apply the suggested size ·
 `↑/↓` choose a type · `y`/`n` (or `←/→` + `enter`) answer the location question · `ctrl+d` change the download directory · `ctrl+c` quit. Existing files are only replaced after a
@@ -69,9 +74,8 @@ Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The 
 | **View** | `internal/view` | `Render(State) string` and `RenderList`. Pure functions with no state and no model access. The UI is a single rounded "card": a FIGlet "bbdx" banner heads the card, a progress rail tracks the four steps, the selected list row and location choice are highlighted, and keycap-styled shortcuts wrap underneath. It tracks the terminal width and degrades gracefully (compact rail, ellipsized rows) down to ~30 columns, and has an ASCII-only, colorless plain mode. |
 | **Controller** | `internal/controller` | Implements Bubble Tea's `tea.Model`. Translates key presses into model calls, runs generation asynchronously with a spinner, and builds the `view.State`. |
 
-`internal/cli` parses the command line and starts the TUI. `main.go` (`bbdx_file_gen`)
-and `cmd/bbdxfg` (`bbdxfg`) are one-line entry points into it, so both names accept the same
-flags and behave identically; messages name the command you typed.
+`internal/cli` parses the command line and starts the TUI; `cmd/bbdxfg` is the
+one-line entry point into it.
 
 Generators stream their output and compute checksums (CRC-32, CRC-8/16, MD5)
 incrementally, so a 1 GiB file never sits in memory.

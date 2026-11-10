@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"bbdx_file_gen/internal/model"
-	"bbdx_file_gen/internal/view"
+	"github.com/bromanodlx/bbdx_file_gen/internal/model"
+	"github.com/bromanodlx/bbdx_file_gen/internal/view"
 )
 
 // ListRows prepares the formats of reg for view.RenderList: grouped by

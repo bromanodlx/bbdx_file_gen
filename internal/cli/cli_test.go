@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"bbdx_file_gen/internal/controller"
+	"github.com/bromanodlx/bbdx_file_gen/internal/controller"
+	"github.com/bromanodlx/bbdx_file_gen/internal/view"
 )
 
 // cli runs the command line with a private config and home directory.
@@ -18,7 +19,7 @@ func cli(t *testing.T, args ...string) (code int, stdout, stderr string, cfgDir 
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
 	t.Setenv("HOME", t.TempDir())
 	var out, errb bytes.Buffer
-	code = Run("bbdx_file_gen", args, &out, &errb)
+	code = Run(args, &out, &errb)
 	return code, out.String(), errb.String(), cfgDir
 }
 
@@ -44,7 +45,7 @@ func TestListMatchesGolden(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
-	if code, out, _, _ := cli(t, "-version"); code != 0 || out != "bbdx_file_gen "+Version+"\n" {
+	if code, out, _, _ := cli(t, "-version"); code != 0 || out != "bbdxfg "+Version+"\n" {
 		t.Errorf("exit %d, output %q", code, out)
 	}
 }
@@ -74,7 +75,7 @@ func TestSetDownloadDirStoresAbsolutePath(t *testing.T) {
 
 func TestSetUnreachableDownloadDirFails(t *testing.T) {
 	code, out, errOut, cfgDir := cli(t, "-download-dir", "/nonexistent/bbdx")
-	if code != 1 || out != "" || errOut != "bbdx_file_gen: /nonexistent/bbdx does not exist\n" {
+	if code != 1 || out != "" || errOut != "bbdxfg: /nonexistent/bbdx does not exist\n" {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 	if _, err := os.Stat(filepath.Join(cfgDir, "bbdx_file_gen", "config.json")); err == nil {
@@ -85,11 +86,11 @@ func TestSetUnreachableDownloadDirFails(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{{"-bogus"}, {"report.pdf"}, {"-plain", "extra"}, {"-download-dir"}} {
 		code, out, errOut, _ := cli(t, args...)
-		if code != 2 || out != "" || !strings.Contains(errOut, "Usage of bbdx_file_gen") {
+		if code != 2 || out != "" || !strings.Contains(errOut, "Usage of bbdxfg:") {
 			t.Errorf("%q: exit %d, stdout %q, stderr %q", args, code, out, errOut)
 		}
 	}
-	if _, _, errOut, _ := cli(t, "report.pdf"); !strings.Contains(errOut, `unexpected argument "report.pdf"`) {
+	if _, _, errOut, _ := cli(t, "report.pdf"); !strings.HasPrefix(errOut, `bbdxfg: unexpected argument "report.pdf"`) {
 		t.Errorf("stray argument not named: %q", errOut)
 	}
 }
@@ -123,33 +124,27 @@ func TestPlainModeSelection(t *testing.T) {
 	}
 }
 
-// bbdxfg is the same tool under a short name: identical behavior, messages
-// that name the command the user typed.
-func TestShortNameBbdxfg(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+// bbdxfg is the only command name; the config directory keeps the project
+// name, so settings saved by earlier versions (bbdx_file_gen) still apply.
+func TestCommandNameAndConfigLocation(t *testing.T) {
+	if view.Command != "bbdxfg" {
+		t.Fatalf("command name %q", view.Command)
+	}
+	cfgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
 	t.Setenv("HOME", t.TempDir())
-	runAs := func(name string, args ...string) (int, string, string) {
-		var out, errb bytes.Buffer
-		code := Run(name, args, &out, &errb)
-		return code, out.String(), errb.String()
-	}
-	for _, args := range [][]string{{"-list"}, {"-version"}} {
-		c1, o1, _ := runAs("bbdx_file_gen", args...)
-		c2, o2, _ := runAs("bbdxfg", args...)
-		if c1 != 0 || c2 != 0 || o1 != o2 {
-			t.Errorf("%v: bbdxfg differs from bbdx_file_gen", args)
-		}
-	}
-	if code, _, errOut := runAs("bbdxfg", "stray"); code != 2 ||
-		!strings.HasPrefix(errOut, `bbdxfg: unexpected argument "stray"`) || !strings.Contains(errOut, "Usage of bbdxfg:") {
-		t.Errorf("exit %d, stderr %q", code, errOut)
-	}
-	if code, _, errOut := runAs("bbdxfg", "-download-dir", "/nonexistent/bbdx"); code != 1 ||
-		errOut != "bbdxfg: /nonexistent/bbdx does not exist\n" {
-		t.Errorf("exit %d, stderr %q", code, errOut)
+	dl := t.TempDir()
+	old := filepath.Join(cfgDir, "bbdx_file_gen", "config.json")
+	os.MkdirAll(filepath.Dir(old), 0o700)
+	if err := os.WriteFile(old, []byte(`{"download_dir":"`+dl+`"}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	got := stubTUI(t)
-	if code, _, errOut := runAs("bbdxfg"); code != 0 || *got == nil {
-		t.Errorf("bbdxfg did not start the TUI: exit %d, stderr %q", code, errOut)
+	var out, errb bytes.Buffer
+	if code := Run(nil, &out, &errb); code != 0 || *got == nil {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	if s := (*got).State(); s.Step != view.StepName || s.DownloadDir != dl {
+		t.Errorf("existing config not used: step %v, download dir %q", s.Step, s.DownloadDir)
 	}
 }

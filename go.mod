@@ -1,4 +1,4 @@
-module bbdx_file_gen
+module github.com/bromanodlx/bbdx_file_gen
 
 go 1.24.2
 

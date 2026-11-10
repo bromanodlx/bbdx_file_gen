@@ -11,7 +11,7 @@ func render(s State) string { return ansi.Strip(Render(s)) }
 
 func TestRenderShowsTitleAndSteps(t *testing.T) {
 	out := render(State{Step: StepName, Input: "> report"})
-	for _, want := range []string{"bbdx_file_gen", "Name", "Type", "Size", "File name", "> report"} {
+	for _, want := range []string{"bbdxfg", "Name", "Type", "Size", "File name", "> report"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -235,7 +235,7 @@ func TestRenderShowsFigletBanner(t *testing.T) {
 	if strings.Contains(narrow, Banner[0]) {
 		t.Errorf("banner must collapse at narrow widths:\n%s", narrow)
 	}
-	if !strings.Contains(narrow, "bbdx_file_gen") {
+	if !strings.Contains(narrow, "bbdxfg") {
 		t.Errorf("narrow fallback must still name the tool:\n%s", narrow)
 	}
 }
@@ -304,7 +304,7 @@ func TestRenderPlainModeIsAsciiAndColorless(t *testing.T) {
 
 func TestRenderPlainKeepsContentAndUsesAsciiFrame(t *testing.T) {
 	out := Render(State{Step: StepName, Plain: true, Input: "> report", Width: 70})
-	for _, want := range []string{"bbdx_file_gen", "Name", "File name", "> report", "+", "|", "-"} {
+	for _, want := range []string{"bbdxfg", "Name", "File name", "> report", "+", "|", "-"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plain output lacks %q:\n%s", want, out)
 		}

@@ -118,6 +118,9 @@ var Banner = func() []string {
 	return rows
 }()
 
+// Command is the tool's command name, shown in the card and in CLI messages.
+const Command = "bbdxfg"
+
 // bannerBlock renders the FIGlet banner and subtitle, falling back to a plain
 // wordmark when the art would not fit the card.
 func bannerBlock(inner int, g glyphs) []string {
@@ -127,10 +130,10 @@ func bannerBlock(inner int, g glyphs) []string {
 			out = append(out, brandSt.Render(row))
 		}
 	} else {
-		out = append(out, brandSt.Render("bbdx_file_gen"))
+		out = append(out, brandSt.Render(Command))
 	}
 	return append(out,
-		mutedSt.Render("bbdx_file_gen "+g.dash+" standard-compliant test files"),
+		mutedSt.Render(Command+" "+g.dash+" standard-compliant test files"),
 		"",
 	)
 }

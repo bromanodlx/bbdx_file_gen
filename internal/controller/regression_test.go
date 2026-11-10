@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"bbdx_file_gen/internal/model"
-	"bbdx_file_gen/internal/view"
+	"github.com/bromanodlx/bbdx_file_gen/internal/model"
+	"github.com/bromanodlx/bbdx_file_gen/internal/view"
 )
 
 func TestListRowsGroupsByCategory(t *testing.T) {

@@ -15,8 +15,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"bbdx_file_gen/internal/model"
-	"bbdx_file_gen/internal/view"
+	"github.com/bromanodlx/bbdx_file_gen/internal/model"
+	"github.com/bromanodlx/bbdx_file_gen/internal/view"
 )
 
 const visibleSuggestions = 8
