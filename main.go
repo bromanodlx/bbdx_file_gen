@@ -15,7 +15,7 @@ import (
 	"bbdx_file_gen/internal/view"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	list := flag.Bool("list", false, "list supported file types and exit")
