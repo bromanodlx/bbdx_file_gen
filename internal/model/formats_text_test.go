@@ -130,7 +130,21 @@ func TestJavaScriptSyntax(t *testing.T) {
 }
 
 func TestJavaCompiles(t *testing.T) {
-	toolCheck(t, "java", []int64{0, 100}, func(p string) { runTool(t, "javac", "-d", t.TempDir(), p) })
+	toolCheck(t, "java", toolSizes, func(p string) { runTool(t, "javac", "-d", t.TempDir(), p) })
+}
+
+func TestJavaRunsAndPrints(t *testing.T) {
+	p := writeTemp(t, "java", generate(t, "java", 3000))
+	if out := runTool(t, "java", p); strings.TrimSpace(out) != "bbdx test file" {
+		t.Errorf("unexpected output %q", out)
+	}
+}
+
+func TestPHPRunsAndPrints(t *testing.T) {
+	p := writeTemp(t, "php", generate(t, "php", 3000))
+	if out := runTool(t, "php", p); strings.TrimSpace(out) != "bbdx test file" {
+		t.Errorf("unexpected output %q", out)
+	}
 }
 
 func TestPHPSyntax(t *testing.T) {
