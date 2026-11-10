@@ -29,10 +29,16 @@ var startTUI = func(ctrl *controller.Controller) error {
 const name = view.Command
 
 // Run executes the command line and returns the process exit code: 0 on
-// success, 1 on a runtime error, 2 on a usage error.
-func Run(args []string, stdout, stderr io.Writer) int {
+// success, 1 on a runtime error, 2 on a usage error. stdin answers the
+// deinstall confirmation.
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "Usage of %s:\n  %s [flags]      start the wizard\n  %s %s    remove %s and its configuration\nFlags:\n",
+			name, name, name, deinstallCmd, name)
+		fs.PrintDefaults()
+	}
 	list := fs.Bool("list", false, "list supported file types and exit")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	setDownloads := fs.String("download-dir", "", "set the standard download directory (absolute or relative path) and exit")
@@ -43,10 +49,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	if fs.NArg() > 0 {
-		// The wizard asks for everything; a stray argument such as a file
-		// name would otherwise be ignored without notice.
-		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", name, fs.Arg(0))
+	cmd, err := subcommand(fs)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", name, err)
 		fs.Usage()
 		return 2
 	}
@@ -77,6 +82,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	if cmd == deinstallCmd {
+		return deinstall(stdin, stdout, stderr, cfgPath)
+	}
 	store := model.ConfigStore{Path: cfgPath}
 
 	if *setDownloads != "" {
@@ -100,4 +108,20 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	return 0
+}
+
+// subcommand returns the subcommand named on the command line, or "" for
+// the wizard. deinstall stands alone; any other argument is an error, since
+// the wizard asks for everything and a stray argument such as a file name
+// would otherwise be ignored without notice.
+func subcommand(fs *flag.FlagSet) (string, error) {
+	switch {
+	case fs.NArg() == 0:
+		return "", nil
+	case fs.Arg(0) != deinstallCmd:
+		return "", fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	case fs.NArg() > 1 || fs.NFlag() > 0:
+		return "", fmt.Errorf("%s takes no flags or arguments", deinstallCmd)
+	}
+	return deinstallCmd, nil
 }

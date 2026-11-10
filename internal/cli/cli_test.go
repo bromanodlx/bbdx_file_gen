@@ -19,7 +19,7 @@ func cli(t *testing.T, args ...string) (code int, stdout, stderr string, cfgDir 
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
 	t.Setenv("HOME", t.TempDir())
 	var out, errb bytes.Buffer
-	code = Run(args, &out, &errb)
+	code = Run(args, strings.NewReader(""), &out, &errb)
 	return code, out.String(), errb.String(), cfgDir
 }
 
@@ -141,7 +141,7 @@ func TestCommandNameAndConfigLocation(t *testing.T) {
 	}
 	got := stubTUI(t)
 	var out, errb bytes.Buffer
-	if code := Run(nil, &out, &errb); code != 0 || *got == nil {
+	if code := Run(nil, strings.NewReader(""), &out, &errb); code != 0 || *got == nil {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
 	if s := (*got).State(); s.Step != view.StepName || s.DownloadDir != dl {

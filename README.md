@@ -47,6 +47,7 @@ bbdxfg -list             # print all supported types with their minimum sizes
 bbdxfg -download-dir ~/Downloads   # set the standard download directory
 bbdxfg -plain            # ASCII-only, no-color interface for basic terminals
 bbdxfg -version
+bbdxfg deinstall         # remove bbdxfg and its configuration (asks first)
 ```
 
 Prebuilt binaries for Linux, macOS and Windows are on the
@@ -65,6 +66,17 @@ on automatically when `NO_COLOR` is set or `TERM=dumb`.
 
 Size units: `B`; `KB`/`MB`/`GB` = ×1000 (SI); `KiB`/`MiB`/`GiB` or `K`/`M`/`G` = ×1024 (IEC).
 Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The maximum is 1 GiB.
+
+### Deinstall
+
+`bbdxfg deinstall` asks *Are you sure??*. Only `y` or `yes` (any capitalization)
+continues; anything else, including just `enter`, exits and removes nothing. On
+yes it removes the configuration directory (`$XDG_CONFIG_HOME/bbdx_file_gen`), the
+running executable and the symlink it was started through, if any, and lists every
+path it removed. Files you generated are never touched. Symlinks are removed
+themselves, never what they point to. If something can't be removed (e.g. an
+executable in a system directory, or the running `.exe` on Windows), the path is
+reported and the exit code is 1.
 
 ## Architecture (MVC)
 
