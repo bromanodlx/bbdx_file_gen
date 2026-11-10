@@ -1,11 +1,17 @@
 # bbdx_file_gen
 
 A terminal UI for creating **standard-compliant test files** of an exact size.
-It asks for three things:
+It asks four questions:
 
 1. **Name**: the file name, which may include a directory, e.g. `uploads/report`.
 2. **File type**: an extension or alias, e.g. `pdf`, `.JPEG`, `yml`. A live, filterable list is shown.
 3. **Size**: e.g. `2048`, `64KiB`, `1.5MB`. Leave it empty to get the smallest standard-compliant file of that type.
+4. **Location**: *Create the file in the current directory?* **Yes** puts it in the
+   current directory, **No** puts it in your standard download folder. The download
+   folder comes from `$XDG_DOWNLOAD_DIR`, then `XDG_DOWNLOAD_DIR` in
+   `~/.config/user-dirs.dirs` (so localized names like `~/Herunterladen` work),
+   then `~/Downloads`. It is created if it doesn't exist. Absolute names such as
+   `/tmp/x` skip this question.
 
 Every generated file is a real, valid file of its type: PDFs open, images decode,
 media plays, archives test OK, and source files compile or run. It is also
@@ -18,13 +24,12 @@ the end of the file.
 
 ```sh
 go build -o bbdx_file_gen .
-./bbdx_file_gen                 # interactive TUI, files go to the current directory
-./bbdx_file_gen -dir /tmp/out   # base directory for relative names
-./bbdx_file_gen -list           # print all supported types with their minimum sizes
+./bbdx_file_gen          # interactive TUI
+./bbdx_file_gen -list    # print all supported types with their minimum sizes
 ```
 
 Keys: `enter` next · `esc` back · `tab` complete the type, or apply the suggested size ·
-`↑/↓` choose a type · `ctrl+c` quit. Existing files are only replaced after a
+`↑/↓` choose a type · `y`/`n` (or `←/→` + `enter`) answer the location question · `ctrl+c` quit. Existing files are only replaced after a
 `y/N` confirmation. Files are written to a temporary name and renamed into place,
 so an aborted run never leaves a partial file behind.
 
@@ -35,7 +40,7 @@ Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The 
 
 | Layer | Package | Responsibility |
 |---|---|---|
-| **Model** | `internal/model` | Domain logic with no UI code. `Format` (metadata, `SizeRule`, streaming writer), `Registry` (lookup by extension or alias, prefix search), `Service` (validation, atomic file creation), size parsing, and the 50 generators grouped by family in `formats_*.go`. |
+| **Model** | `internal/model` | Domain logic with no UI code. `Format` (metadata, `SizeRule`, streaming writer), `Registry` (lookup by extension or alias, prefix search), `Service` (validation, atomic file creation), download-folder lookup, size parsing, and the 50 generators grouped by family in `formats_*.go`. |
 | **View** | `internal/view` | `Render(State) string` and `RenderList`. Pure functions with no state and no model access. |
 | **Controller** | `internal/controller` | Implements Bubble Tea's `tea.Model`. Translates key presses into model calls, runs generation asynchronously with a spinner, and builds the `view.State`. |
 
@@ -103,6 +108,6 @@ go test -short ./...   # quick suite
   conversion, SQLite `integrity_check`, `python3 -m py_compile`, `cc -pedantic -Werror`,
   `node --check`, `sh -n`, `javac`, `php -l`.
 - **Controller tests** run complete wizard flows: minimum size, units,
-  unreachable sizes with the tab suggestion, aliases, back navigation, overwrite
+  unreachable sizes with the tab suggestion, aliases, both location answers, back navigation, overwrite
   confirmation, errors and quitting.
 - **View tests** check the rendered content and that every line fits in a 40-column terminal.

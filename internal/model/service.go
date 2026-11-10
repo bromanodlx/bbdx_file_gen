@@ -15,8 +15,12 @@ var (
 
 // Request describes one file to generate.
 type Request struct {
-	Name string
-	Ext  string
+	// Dir is the base directory for relative names ("" = working directory).
+	Dir string
+	// MakeDir creates Dir if it does not exist yet (e.g. the Downloads folder).
+	MakeDir bool
+	Name    string
+	Ext     string
 	// Size is the exact size in bytes; nil means the format's minimum.
 	Size      *int64
 	Overwrite bool
@@ -32,8 +36,6 @@ type Result struct {
 // Service creates files on disk.
 type Service struct {
 	Registry *Registry
-	// Dir is the base directory for relative names ("" = working directory).
-	Dir string
 }
 
 // ValidateName checks a user supplied file name (which may contain directories).
@@ -62,8 +64,9 @@ func FileName(name, ext string) string {
 	return n + "." + ext
 }
 
-// TargetPath resolves the final path for name and ext.
-func (s *Service) TargetPath(name, ext string) (string, error) {
+// TargetPath resolves the final path for name and ext; relative names are
+// placed in dir.
+func (s *Service) TargetPath(dir, name, ext string) (string, error) {
 	if err := ValidateName(name); err != nil {
 		return "", err
 	}
@@ -72,8 +75,8 @@ func (s *Service) TargetPath(name, ext string) (string, error) {
 		return "", fmt.Errorf("%w: %q", ErrUnknownFormat, NormalizeExt(ext))
 	}
 	p := FileName(name, f.Ext)
-	if !filepath.IsAbs(p) && s.Dir != "" {
-		p = filepath.Join(s.Dir, p)
+	if !filepath.IsAbs(p) && dir != "" {
+		p = filepath.Join(dir, p)
 	}
 	return p, nil
 }
@@ -81,7 +84,7 @@ func (s *Service) TargetPath(name, ext string) (string, error) {
 // Create generates the requested file. The file is written to a temporary
 // name first and renamed into place, so failures never leave partial files.
 func (s *Service) Create(req Request) (Result, error) {
-	path, err := s.TargetPath(req.Name, req.Ext)
+	path, err := s.TargetPath(req.Dir, req.Name, req.Ext)
 	if err != nil {
 		return Result{}, err
 	}
@@ -93,6 +96,11 @@ func (s *Service) Create(req Request) (Result, error) {
 	if err := f.Rule.Check(size); err != nil {
 		err.(*SizeError).Ext = f.Ext
 		return Result{}, err
+	}
+	if req.MakeDir && req.Dir != "" && !filepath.IsAbs(strings.TrimSpace(req.Name)) {
+		if err := os.MkdirAll(req.Dir, 0o755); err != nil {
+			return Result{}, err
+		}
 	}
 	if _, err := os.Stat(path); err == nil && !req.Overwrite {
 		return Result{}, fmt.Errorf("%w: %s", ErrExists, path)

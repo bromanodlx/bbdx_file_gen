@@ -123,3 +123,31 @@ func TestRenderListGroupsByCategory(t *testing.T) {
 		t.Errorf("total missing:\n%s", out)
 	}
 }
+
+func TestRenderLocationQuestion(t *testing.T) {
+	s := State{Step: StepLocation, TargetPath: "report.pdf", CurrentDir: "/home/u/proj", DownloadDir: "/home/u/Downloads", LocationYes: true}
+	out := render(s)
+	for _, want := range []string{"4 Location", "report.pdf", "current directory", "/home/u/proj", "/home/u/Downloads", "Yes", "No"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	marked := func(out, word string) bool {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, word) && strings.Contains(line, "▸") {
+				return true
+			}
+		}
+		return false
+	}
+	if !marked(out, "Yes") || marked(out, "No ") {
+		t.Errorf("yes must be marked:\n%s", out)
+	}
+	s.LocationYes = false
+	if out := render(s); marked(out, "Yes") || !marked(out, "No ") {
+		t.Errorf("no must be marked:\n%s", out)
+	}
+	if out := render(s); !strings.Contains(out, "y/n") {
+		t.Errorf("location help must mention y/n:\n%s", out)
+	}
+}

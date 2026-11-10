@@ -18,7 +18,6 @@ import (
 const version = "1.0.0"
 
 func main() {
-	dir := flag.String("dir", "", "directory for relative file names (default: current directory)")
 	list := flag.Bool("list", false, "list supported file types and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -33,11 +32,23 @@ func main() {
 		return
 	}
 
-	svc := &model.Service{Registry: reg, Dir: *dir}
-	if _, err := tea.NewProgram(controller.New(svc), tea.WithAltScreen()).Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "bbdx_file_gen:", err)
-		os.Exit(1)
+	cwd, err := os.Getwd()
+	if err != nil {
+		fail(err)
 	}
+	downloads, err := model.DownloadDir()
+	if err != nil {
+		fail(err)
+	}
+	ctrl := controller.New(&model.Service{Registry: reg}, controller.Locations{Current: cwd, Downloads: downloads})
+	if _, err := tea.NewProgram(ctrl, tea.WithAltScreen()).Run(); err != nil {
+		fail(err)
+	}
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "bbdx_file_gen:", err)
+	os.Exit(1)
 }
 
 func listRows(reg *model.Registry) []view.ListRow {

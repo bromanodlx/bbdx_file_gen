@@ -17,6 +17,7 @@ const (
 	StepName Step = iota
 	StepExt
 	StepSize
+	StepLocation
 	StepConfirm
 	StepGenerating
 	StepDone
@@ -46,6 +47,10 @@ type State struct {
 	MinSize  string
 	MinBytes int64
 	SizeNote string
+
+	CurrentDir  string
+	DownloadDir string
+	LocationYes bool // "Yes" (current directory) is highlighted
 
 	SizeLabel string // human readable size of the file being/just generated
 	Bytes     int64
@@ -93,6 +98,11 @@ func Render(s State) string {
 		if s.SizeNote != "" {
 			b.WriteString(mutedSt.Render("Note: "+s.SizeNote) + "\n")
 		}
+	case StepLocation:
+		b.WriteString(labelSt.Render("Location") + mutedSt.Render("  for "+s.TargetPath) + "\n")
+		b.WriteString("Create the file in the current directory?\n")
+		b.WriteString(choice(s.LocationYes, "Yes", s.CurrentDir) + "\n")
+		b.WriteString(choice(!s.LocationYes, "No ", s.DownloadDir+"  (download folder)") + "\n")
 	case StepConfirm:
 		b.WriteString(errorSt.Render(s.TargetPath+" already exists.") + " Overwrite? " + labelSt.Render("[y/N]") + "\n")
 	case StepGenerating:
@@ -113,7 +123,7 @@ func Render(s State) string {
 }
 
 func steps(cur Step) string {
-	names := []string{"Name", "Type", "Size"}
+	names := []string{"Name", "Type", "Size", "Location"}
 	parts := make([]string, len(names))
 	for i, n := range names {
 		label := fmt.Sprintf("%d %s", i+1, n)
@@ -152,6 +162,13 @@ func suggestions(s State) string {
 	return b.String()
 }
 
+func choice(selected bool, label, dir string) string {
+	if selected {
+		return selectSt.Render("▸ "+label) + "  → " + dir
+	}
+	return "  " + label + mutedSt.Render("  → "+dir)
+}
+
 func help(step Step) string {
 	switch step {
 	case StepName:
@@ -159,7 +176,9 @@ func help(step Step) string {
 	case StepExt:
 		return "enter select · tab complete · ↑/↓ choose · esc back · ctrl+c quit"
 	case StepSize:
-		return "enter generate · esc back · ctrl+c quit"
+		return "enter next · tab apply suggestion · esc back · ctrl+c quit"
+	case StepLocation:
+		return "y/n answer · ←/→ choose · enter confirm · esc back · ctrl+c quit"
 	case StepConfirm:
 		return "y overwrite · n/esc back"
 	case StepGenerating:

@@ -31,9 +31,16 @@ type (
 	spinnerTick struct{}
 )
 
+// Locations are the two directories the user chooses between.
+type Locations struct {
+	Current   string // the working directory ("Yes")
+	Downloads string // the standard download directory ("No")
+}
+
 // Controller holds the wizard state.
 type Controller struct {
 	svc *model.Service
+	loc Locations
 
 	step                           view.Step
 	nameInput, extInput, sizeInput textinput.Model
@@ -43,7 +50,10 @@ type Controller struct {
 	offset  int
 
 	format  model.Format
-	target  string
+	target  string // final path once the location is known, else the bare file name
+	dir     string // chosen base directory
+	makeDir bool   // create dir if missing (the download directory)
+	locYes  bool   // "Yes" highlighted in the location question
 	size    int64
 	suggest int64 // nearest valid size offered after a SizeError, -1 if none
 	errMsg  string
@@ -53,10 +63,11 @@ type Controller struct {
 	height  int
 }
 
-// New creates a controller that generates files through svc.
-func New(svc *model.Service) *Controller {
+// New creates a controller that generates files through svc into one of loc.
+func New(svc *model.Service, loc Locations) *Controller {
 	c := &Controller{
 		svc:       svc,
+		loc:       loc,
 		nameInput: newInput("report"),
 		extInput:  newInput("pdf, png, docx, …"),
 		sizeInput: newInput(""),
@@ -93,7 +104,7 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, tick()
 	case generatedMsg:
 		if msg.err != nil {
-			c.step = view.StepSize
+			c.goTo(c.backFromGenerate())
 			c.errMsg = msg.err.Error()
 			return c, nil
 		}
@@ -111,6 +122,8 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return c.updateExt(msg)
 		case view.StepSize:
 			return c.updateSize(msg)
+		case view.StepLocation:
+			return c.updateLocation(msg)
 		case view.StepConfirm:
 			return c.updateConfirm(msg)
 		case view.StepDone:
@@ -169,7 +182,7 @@ func (c *Controller) updateExt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			c.errMsg = fmt.Sprintf("unknown file type %q (%d types supported)", model.NormalizeExt(c.extInput.Value()), len(c.svc.Registry.All()))
 			return c, nil
 		}
-		target, err := c.svc.TargetPath(c.nameInput.Value(), f.Ext)
+		target, err := c.svc.TargetPath("", c.nameInput.Value(), f.Ext)
 		if err != nil {
 			c.errMsg = err.Error()
 			return c, nil
@@ -220,13 +233,70 @@ func (c *Controller) updateSize(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return c, nil
 		}
 		c.size = size
-		if _, err := os.Stat(c.target); err == nil {
-			c.goTo(view.StepConfirm)
-			return c, nil
+		if c.absoluteName() {
+			c.dir, c.makeDir = "", false
+			return c, c.confirmOrGenerate()
 		}
-		return c, c.generate(false)
+		c.target = model.FileName(c.nameInput.Value(), c.format.Ext)
+		c.locYes = true
+		c.goTo(view.StepLocation)
+		return c, nil
 	}
 	return c, c.edit(&c.sizeInput, msg)
+}
+
+func (c *Controller) updateLocation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Type == tea.KeyEsc:
+		c.goTo(view.StepSize)
+	case msg.Type == tea.KeyLeft || msg.Type == tea.KeyUp:
+		c.locYes = true
+	case msg.Type == tea.KeyRight || msg.Type == tea.KeyDown || msg.Type == tea.KeyTab:
+		c.locYes = !c.locYes
+	case msg.String() == "y" || msg.String() == "Y":
+		return c, c.chooseLocation(true)
+	case msg.String() == "n" || msg.String() == "N":
+		return c, c.chooseLocation(false)
+	case msg.Type == tea.KeyEnter:
+		return c, c.chooseLocation(c.locYes)
+	}
+	return c, nil
+}
+
+// chooseLocation answers "create in the current directory?".
+func (c *Controller) chooseLocation(yes bool) tea.Cmd {
+	c.locYes = yes
+	c.dir, c.makeDir = c.loc.Current, false
+	if !yes {
+		c.dir, c.makeDir = c.loc.Downloads, true
+	}
+	return c.confirmOrGenerate()
+}
+
+func (c *Controller) confirmOrGenerate() tea.Cmd {
+	target, err := c.svc.TargetPath(c.dir, c.nameInput.Value(), c.format.Ext)
+	if err != nil {
+		c.errMsg = err.Error()
+		return nil
+	}
+	c.target = target
+	if _, err := os.Stat(target); err == nil {
+		c.goTo(view.StepConfirm)
+		return nil
+	}
+	return c.generate(false)
+}
+
+func (c *Controller) absoluteName() bool {
+	return filepath.IsAbs(strings.TrimSpace(c.nameInput.Value()))
+}
+
+// backFromGenerate is the step to return to when generation is declined or fails.
+func (c *Controller) backFromGenerate() view.Step {
+	if c.absoluteName() {
+		return view.StepSize
+	}
+	return view.StepLocation
 }
 
 func (c *Controller) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -234,7 +304,7 @@ func (c *Controller) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "y" || msg.String() == "Y":
 		return c, c.generate(true)
 	case msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || msg.String() == "n" || msg.String() == "N":
-		c.goTo(view.StepSize)
+		c.goTo(c.backFromGenerate())
 	}
 	return c, nil
 }
@@ -252,7 +322,10 @@ func (c *Controller) updateDone(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (c *Controller) generate(overwrite bool) tea.Cmd {
 	c.goTo(view.StepGenerating)
 	size := c.size
-	req := model.Request{Name: c.nameInput.Value(), Ext: c.format.Ext, Size: &size, Overwrite: overwrite}
+	req := model.Request{
+		Dir: c.dir, MakeDir: c.makeDir,
+		Name: c.nameInput.Value(), Ext: c.format.Ext, Size: &size, Overwrite: overwrite,
+	}
 	svc := c.svc
 	return tea.Batch(func() tea.Msg {
 		res, err := svc.Create(req)
@@ -325,7 +398,8 @@ func (c *Controller) State() view.State {
 		Step: c.step, Width: c.width, Height: c.height,
 		Name: strings.TrimSpace(c.nameInput.Value()), Error: c.errMsg,
 		Ext: c.format.Ext, FormatName: c.format.Name, TargetPath: c.target,
-		Spinner: spinnerFrames[c.frame%len(spinnerFrames)],
+		Spinner:    spinnerFrames[c.frame%len(spinnerFrames)],
+		CurrentDir: c.loc.Current, DownloadDir: c.loc.Downloads, LocationYes: c.locYes,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note

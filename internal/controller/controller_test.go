@@ -14,16 +14,19 @@ import (
 )
 
 type harness struct {
-	t    *testing.T
-	c    *Controller
-	dir  string
-	quit bool
+	t         *testing.T
+	c         *Controller
+	dir       string // stands in for the current directory
+	downloads string // stands in for ~/Downloads (not created yet)
+	quit      bool
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	dir := t.TempDir()
-	h := &harness{t: t, c: New(&model.Service{Registry: model.Default(), Dir: dir}), dir: dir}
+	dl := filepath.Join(t.TempDir(), "Downloads")
+	c := New(&model.Service{Registry: model.Default()}, Locations{Current: dir, Downloads: dl})
+	h := &harness{t: t, c: c, dir: dir, downloads: dl}
 	h.run(h.c.Init())
 	return h
 }
@@ -111,11 +114,13 @@ func TestFullFlowWithMinimumSize(t *testing.T) {
 	h.key(tea.KeyEnter)
 	h.expectStep(view.StepSize)
 	png, _ := model.Default().Lookup("png")
-	if st := h.c.State(); st.MinBytes != png.Rule.Min || st.TargetPath != filepath.Join(h.dir, "report.png") {
+	if st := h.c.State(); st.MinBytes != png.Rule.Min || st.TargetPath != "report.png" {
 		t.Fatalf("size state = %+v", st)
 	}
 
 	h.key(tea.KeyEnter) // empty = minimum
+	h.expectStep(view.StepLocation)
+	h.typ("y")
 	h.expectStep(view.StepDone)
 	if got := fileSize(t, filepath.Join(h.dir, "report.png")); got != png.Rule.Min {
 		t.Errorf("file has %d bytes, want minimum %d", got, png.Rule.Min)
@@ -133,6 +138,7 @@ func TestExplicitSizeWithUnit(t *testing.T) {
 	h.key(tea.KeyEnter)
 	h.typ("2KiB")
 	h.key(tea.KeyEnter)
+	h.typ("y")
 	h.expectStep(view.StepDone)
 	if got := fileSize(t, filepath.Join(h.dir, "data.json")); got != 2048 {
 		t.Errorf("file has %d bytes", got)
@@ -171,6 +177,7 @@ func TestUnreachableSizeOffersNearestAndTabAppliesIt(t *testing.T) {
 		t.Fatalf("tab should fill in 1536, input = %q", h.c.sizeInput.Value())
 	}
 	h.key(tea.KeyEnter)
+	h.typ("y")
 	h.expectStep(view.StepDone)
 	if got := fileSize(t, filepath.Join(h.dir, "t.tar")); got != 1536 {
 		t.Errorf("file has %d bytes", got)
@@ -237,7 +244,7 @@ func TestAliasIsAccepted(t *testing.T) {
 	h.typ(".JPEG")
 	h.key(tea.KeyEnter)
 	h.expectStep(view.StepSize)
-	if h.c.State().TargetPath != filepath.Join(h.dir, "photo.jpg") {
+	if h.c.State().TargetPath != "photo.jpg" {
 		t.Errorf("target = %q", h.c.State().TargetPath)
 	}
 }
@@ -251,7 +258,7 @@ func TestNameWithKnownExtensionPrefillsType(t *testing.T) {
 		t.Errorf("ext input = %q, want mp3", h.c.extInput.Value())
 	}
 	h.key(tea.KeyEnter)
-	if h.c.State().TargetPath != filepath.Join(h.dir, "song.mp3") {
+	if h.c.State().TargetPath != "song.mp3" {
 		t.Errorf("target = %q", h.c.State().TargetPath)
 	}
 }
@@ -287,15 +294,16 @@ func TestOverwriteConfirmation(t *testing.T) {
 	h.key(tea.KeyEnter)
 	h.typ("100")
 	h.key(tea.KeyEnter)
+	h.typ("y")
 	h.expectStep(view.StepConfirm)
 
 	h.typ("n")
-	h.expectStep(view.StepSize)
+	h.expectStep(view.StepLocation)
 	if got := fileSize(t, target); got != 8 {
 		t.Fatal("declining must keep the original file")
 	}
 
-	h.key(tea.KeyEnter)
+	h.typ("y")
 	h.expectStep(view.StepConfirm)
 	h.typ("y")
 	h.expectStep(view.StepDone)
@@ -311,6 +319,7 @@ func TestDoneAllowsAnotherFileOrQuit(t *testing.T) {
 	h.typ("md")
 	h.key(tea.KeyEnter)
 	h.key(tea.KeyEnter)
+	h.typ("y")
 	h.expectStep(view.StepDone)
 
 	h.key(tea.KeyEnter)
@@ -324,6 +333,7 @@ func TestDoneAllowsAnotherFileOrQuit(t *testing.T) {
 	h.typ("md")
 	h.key(tea.KeyEnter)
 	h.key(tea.KeyEnter)
+	h.typ("y")
 	h.typ("q")
 	if !h.quit {
 		t.Error("q on the done screen must quit")
@@ -347,7 +357,8 @@ func TestGenerationErrorIsShown(t *testing.T) {
 	h.typ("txt")
 	h.key(tea.KeyEnter)
 	h.key(tea.KeyEnter)
-	h.expectStep(view.StepSize)
+	h.typ("y")
+	h.expectStep(view.StepLocation)
 	if !strings.Contains(h.c.State().Error, "does not exist") {
 		t.Errorf("error = %q", h.c.State().Error)
 	}
@@ -368,4 +379,96 @@ func selected(s []view.Suggestion) string {
 		}
 	}
 	return ""
+}
+
+// toLocation walks the wizard up to the location question.
+func (h *harness) toLocation(name, ext string) {
+	h.t.Helper()
+	h.typ(name)
+	h.key(tea.KeyEnter)
+	h.typ(ext)
+	h.key(tea.KeyEnter)
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepLocation)
+}
+
+func TestLocationQuestionShowsBothDirectories(t *testing.T) {
+	h := newHarness(t)
+	h.toLocation("a", "txt")
+	out := h.screen()
+	for _, want := range []string{"current directory", h.dir, h.downloads} {
+		if !strings.Contains(out, want) {
+			t.Errorf("location screen lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestYesCreatesInCurrentDirectory(t *testing.T) {
+	h := newHarness(t)
+	h.toLocation("here", "txt")
+	h.typ("y")
+	h.expectStep(view.StepDone)
+	fileSize(t, filepath.Join(h.dir, "here.txt"))
+	if _, err := os.Stat(h.downloads); err == nil {
+		t.Error("the download directory must not be touched")
+	}
+}
+
+func TestNoCreatesInDownloadDirectory(t *testing.T) {
+	h := newHarness(t)
+	h.toLocation("there", "json")
+	h.typ("n")
+	h.expectStep(view.StepDone)
+	want := filepath.Join(h.downloads, "there.json")
+	fileSize(t, want)
+	if h.c.State().TargetPath != want {
+		t.Errorf("done screen shows %q, want %q", h.c.State().TargetPath, want)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "there.json")); err == nil {
+		t.Error("file must not be created in the current directory")
+	}
+}
+
+func TestLocationArrowsAndEnter(t *testing.T) {
+	h := newHarness(t)
+	h.toLocation("arrow", "txt")
+	if !h.c.State().LocationYes {
+		t.Fatal("yes (current directory) must be preselected")
+	}
+	h.key(tea.KeyRight)
+	if h.c.State().LocationYes {
+		t.Fatal("right must select no")
+	}
+	h.key(tea.KeyLeft)
+	h.key(tea.KeyRight)
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepDone)
+	fileSize(t, filepath.Join(h.downloads, "arrow.txt"))
+}
+
+func TestEnterAcceptsPreselectedYes(t *testing.T) {
+	h := newHarness(t)
+	h.toLocation("default", "txt")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepDone)
+	fileSize(t, filepath.Join(h.dir, "default.txt"))
+}
+
+func TestEscFromLocationGoesBackToSize(t *testing.T) {
+	h := newHarness(t)
+	h.toLocation("a", "txt")
+	h.key(tea.KeyEsc)
+	h.expectStep(view.StepSize)
+}
+
+func TestAbsoluteNameSkipsLocationQuestion(t *testing.T) {
+	h := newHarness(t)
+	abs := filepath.Join(t.TempDir(), "absolute")
+	h.typ(abs)
+	h.key(tea.KeyEnter)
+	h.typ("txt")
+	h.key(tea.KeyEnter)
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepDone)
+	fileSize(t, abs+".txt")
 }

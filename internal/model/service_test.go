@@ -14,7 +14,7 @@ func newTestService(t *testing.T) (*Service, string) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	return &Service{Registry: reg, Dir: dir}, dir
+	return &Service{Registry: reg}, dir
 }
 
 func TestValidateName(t *testing.T) {
@@ -47,7 +47,7 @@ func TestFileName(t *testing.T) {
 
 func TestServiceCreateUsesMinimumWhenSizeOmitted(t *testing.T) {
 	svc, dir := newTestService(t)
-	res, err := svc.Create(Request{Name: "a", Ext: "txt"})
+	res, err := svc.Create(Request{Dir: dir, Name: "a", Ext: "txt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,9 +58,9 @@ func TestServiceCreateUsesMinimumWhenSizeOmitted(t *testing.T) {
 }
 
 func TestServiceCreateExplicitSize(t *testing.T) {
-	svc, _ := newTestService(t)
+	svc, dir := newTestService(t)
 	size := int64(4096)
-	res, err := svc.Create(Request{Name: "b", Ext: ".JPEG", Size: &size})
+	res, err := svc.Create(Request{Dir: dir, Name: "b", Ext: ".JPEG", Size: &size})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +71,8 @@ func TestServiceCreateExplicitSize(t *testing.T) {
 }
 
 func TestServiceCreateUnknownExtension(t *testing.T) {
-	svc, _ := newTestService(t)
-	if _, err := svc.Create(Request{Name: "a", Ext: "xyz"}); !errors.Is(err, ErrUnknownFormat) {
+	svc, dir := newTestService(t)
+	if _, err := svc.Create(Request{Dir: dir, Name: "a", Ext: "xyz"}); !errors.Is(err, ErrUnknownFormat) {
 		t.Errorf("expected ErrUnknownFormat, got %v", err)
 	}
 }
@@ -81,7 +81,7 @@ func TestServiceCreateInvalidSizeLeavesNoFile(t *testing.T) {
 	svc, dir := newTestService(t)
 	size := int64(1)
 	var se *SizeError
-	if _, err := svc.Create(Request{Name: "a", Ext: "txt", Size: &size}); !errors.As(err, &se) {
+	if _, err := svc.Create(Request{Dir: dir, Name: "a", Ext: "txt", Size: &size}); !errors.As(err, &se) {
 		t.Fatalf("expected SizeError, got %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -90,15 +90,15 @@ func TestServiceCreateInvalidSizeLeavesNoFile(t *testing.T) {
 }
 
 func TestServiceRefusesOverwriteUnlessAllowed(t *testing.T) {
-	svc, _ := newTestService(t)
-	if _, err := svc.Create(Request{Name: "a", Ext: "txt"}); err != nil {
+	svc, dir := newTestService(t)
+	if _, err := svc.Create(Request{Dir: dir, Name: "a", Ext: "txt"}); err != nil {
 		t.Fatal(err)
 	}
 	size := int64(10)
-	if _, err := svc.Create(Request{Name: "a", Ext: "txt", Size: &size}); !errors.Is(err, ErrExists) {
+	if _, err := svc.Create(Request{Dir: dir, Name: "a", Ext: "txt", Size: &size}); !errors.Is(err, ErrExists) {
 		t.Fatalf("expected ErrExists, got %v", err)
 	}
-	res, err := svc.Create(Request{Name: "a", Ext: "txt", Size: &size, Overwrite: true})
+	res, err := svc.Create(Request{Dir: dir, Name: "a", Ext: "txt", Size: &size, Overwrite: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,15 +107,15 @@ func TestServiceRefusesOverwriteUnlessAllowed(t *testing.T) {
 
 func TestServiceTargetPath(t *testing.T) {
 	svc, dir := newTestService(t)
-	p, err := svc.TargetPath("x", "jpeg")
+	p, err := svc.TargetPath(dir, "x", "jpeg")
 	if err != nil || p != filepath.Join(dir, "x.jpg") {
 		t.Errorf("TargetPath = %q, %v", p, err)
 	}
 }
 
 func TestServiceCreateMissingDirectory(t *testing.T) {
-	svc, _ := newTestService(t)
-	if _, err := svc.Create(Request{Name: "nope/a", Ext: "txt"}); err == nil {
+	svc, dir := newTestService(t)
+	if _, err := svc.Create(Request{Dir: dir, Name: "nope/a", Ext: "txt"}); err == nil {
 		t.Error("expected error for a missing parent directory")
 	}
 }
@@ -128,5 +128,32 @@ func assertFileSize(t *testing.T, path string, want int64) {
 	}
 	if st.Size() != want {
 		t.Errorf("%s has %d bytes, want %d", path, st.Size(), want)
+	}
+}
+
+func TestServiceTargetPathIgnoresDirForAbsoluteNames(t *testing.T) {
+	svc, dir := newTestService(t)
+	abs := filepath.Join(t.TempDir(), "x")
+	if p, _ := svc.TargetPath(dir, abs, "txt"); p != abs+".txt" {
+		t.Errorf("TargetPath = %q", p)
+	}
+}
+
+func TestServiceCreateMakesBaseDirOnlyWhenAsked(t *testing.T) {
+	svc, dir := newTestService(t)
+	missing := filepath.Join(dir, "Downloads")
+	if _, err := svc.Create(Request{Dir: missing, Name: "a", Ext: "txt"}); err == nil {
+		t.Fatal("a missing directory must not be created implicitly")
+	}
+	res, err := svc.Create(Request{Dir: missing, MakeDir: true, Name: "a", Ext: "txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Path != filepath.Join(missing, "a.txt") {
+		t.Errorf("path = %q", res.Path)
+	}
+	// MakeDir creates the base directory, not directories inside the name
+	if _, err := svc.Create(Request{Dir: missing, MakeDir: true, Name: "sub/a", Ext: "txt"}); err == nil {
+		t.Error("sub directories of the name must not be created")
 	}
 }
