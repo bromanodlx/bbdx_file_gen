@@ -152,21 +152,3 @@ func textFolded(f Format, head, name, tail string) Format {
 	}
 	return f
 }
-
-// loremStream continues single-line Lorem text across several writes.
-type loremStream struct{ pos int }
-
-func (s *loremStream) write(w io.Writer, n int64) error {
-	for n > 0 {
-		chunk := loremSingle[s.pos:]
-		if int64(len(chunk)) > n {
-			chunk = chunk[:n]
-		}
-		if _, err := w.Write(chunk); err != nil {
-			return err
-		}
-		n -= int64(len(chunk))
-		s.pos = (s.pos + len(chunk)) % len(loremSingle)
-	}
-	return nil
-}

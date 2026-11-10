@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -54,19 +55,10 @@ func (s ConfigStore) Save(cfg Config) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".config-*.tmp")
-	if err != nil {
+	return writeFileAtomic(s.Path, ".config-*.tmp", 0o600, false, func(w io.Writer) error {
+		_, err := w.Write(append(data, '\n'))
 		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), s.Path)
+	})
 }
 
 // ResolveDir interprets a directory as bash would and returns it as a clean
@@ -161,20 +153,29 @@ func CheckDir(dir string) error {
 
 // CompleteDir completes the last path component of input to a matching
 // directory like bash's tab completion: a unique match gets a trailing "/",
-// several matches are completed to their longest common prefix.
+// several matches are completed to their longest common prefix. Both the
+// directory part and the partial name are read with ResolveDir's rules, so
+// escapes and quotes (including those a previous completion inserted), ~ and
+// $VARS work the same way they do when the input is saved.
 func CompleteDir(input, cwd, home string) string {
 	head, partial := "", input
 	if i := strings.LastIndexByte(input, '/'); i >= 0 {
 		head, partial = input[:i+1], input[i+1:]
 	}
-	dir := head
-	switch {
-	case dir == "":
-		dir = cwd
-	case dir == "~/" || strings.HasPrefix(dir, "~/"):
-		dir = filepath.Join(home, dir[2:])
-	case !filepath.IsAbs(dir):
-		dir = filepath.Join(cwd, dir)
+	dir := cwd
+	if head != "" {
+		d, err := ResolveDir(head, cwd, home)
+		if err != nil {
+			return input
+		}
+		dir = d
+	}
+	if strings.ContainsAny(partial, "\\'\"$") {
+		word, err := ResolveDir(partial, string(filepath.Separator), home)
+		if err != nil {
+			return input
+		}
+		partial = filepath.Base(word)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

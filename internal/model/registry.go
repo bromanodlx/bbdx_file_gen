@@ -35,10 +35,23 @@ type Format struct {
 	Write func(w io.Writer, size int64) error
 }
 
+// CheckSize returns nil when f can be produced in exactly size bytes,
+// otherwise a *SizeError naming f's extension and the nearest valid sizes.
+func (f Format) CheckSize(size int64) error {
+	if err := f.Rule.Check(size); err != nil {
+		se := err.(*SizeError)
+		se.Ext = f.Ext
+		return se
+	}
+	return nil
+}
+
+// keys returns the canonical extension followed by the aliases.
+func (f Format) keys() []string { return append([]string{f.Ext}, f.Aliases...) }
+
 // Generate writes a file of exactly size bytes or returns a *SizeError.
 func (f Format) Generate(w io.Writer, size int64) error {
-	if err := f.Rule.Check(size); err != nil {
-		err.(*SizeError).Ext = f.Ext
+	if err := f.CheckSize(size); err != nil {
 		return err
 	}
 	bw := bufio.NewWriterSize(w, 64<<10)
@@ -72,7 +85,7 @@ func NewRegistry(formats ...Format) (*Registry, error) {
 	sorted := append([]Format(nil), formats...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Ext < sorted[j].Ext })
 	for i, f := range sorted {
-		for _, key := range append([]string{f.Ext}, f.Aliases...) {
+		for _, key := range f.keys() {
 			key = NormalizeExt(key)
 			if _, dup := r.byExt[key]; dup {
 				return nil, fmt.Errorf("duplicate extension %q", key)
@@ -101,7 +114,7 @@ func (r *Registry) Search(prefix string) []Format {
 	p := NormalizeExt(prefix)
 	var out []Format
 	for _, f := range r.formats {
-		for _, key := range append([]string{f.Ext}, f.Aliases...) {
+		for _, key := range f.keys() {
 			if strings.HasPrefix(key, p) {
 				out = append(out, f)
 				break

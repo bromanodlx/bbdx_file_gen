@@ -5,7 +5,6 @@ package controller
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -55,7 +54,6 @@ type Controller struct {
 	svc   *model.Service
 	setup Setup
 
-	plain   bool
 	spinner []string
 
 	step                           view.Step
@@ -97,7 +95,6 @@ func New(svc *model.Service, setup Setup) *Controller {
 	c := &Controller{
 		svc:       svc,
 		setup:     setup,
-		plain:     setup.Plain,
 		spinner:   spinner,
 		nameInput: newInput("report", setup.Plain),
 		extInput:  newInput(placeholder, setup.Plain),
@@ -123,20 +120,43 @@ func New(svc *model.Service, setup Setup) *Controller {
 	return c
 }
 
-// askDownloadDir shows the mandatory download directory screen.
+// askDownloadDir shows the mandatory download directory screen; esc quits.
 func (c *Controller) askDownloadDir(reason, prefill string) {
-	c.dlReason, c.dlCancel, c.dlReturn = reason, false, view.StepName
-	c.dlInput.SetValue(prefill)
-	c.dlInput.CursorEnd()
+	c.openDownloadDir(reason, prefill, false, view.StepName)
+}
+
+// changeDownloadDir opens the download directory screen from the current
+// step; esc returns to it with all inputs intact.
+func (c *Controller) changeDownloadDir() {
+	c.openDownloadDir("", c.downloads, true, c.step)
+}
+
+func (c *Controller) openDownloadDir(reason, prefill string, cancel bool, ret view.Step) {
+	c.dlReason, c.dlCancel, c.dlReturn = reason, cancel, ret
+	setInput(&c.dlInput, prefill)
 	c.goTo(view.StepDownloadDir)
 }
 
-// changeDownloadDir opens the download directory screen from the current step.
-func (c *Controller) changeDownloadDir() {
-	c.dlReason, c.dlCancel, c.dlReturn = "", true, c.step
-	c.dlInput.SetValue(c.downloads)
-	c.dlInput.CursorEnd()
-	c.goTo(view.StepDownloadDir)
+// canChangeDownloadDir reports whether ctrl+d may open the download directory
+// screen: not while it is already open, an overwrite is pending or a file is
+// being generated.
+func canChangeDownloadDir(step view.Step) bool {
+	switch step {
+	case view.StepName, view.StepExt, view.StepSize, view.StepLocation, view.StepDone:
+		return true
+	}
+	return false
+}
+
+// setInput replaces an input's text and moves the cursor to its end.
+func setInput(in *textinput.Model, v string) {
+	in.SetValue(v)
+	in.CursorEnd()
+}
+
+// isKey reports whether msg is the letter key (either case).
+func isKey(msg tea.KeyMsg, letter string) bool {
+	return msg.Type == tea.KeyRunes && strings.EqualFold(msg.String(), letter)
 }
 
 func (c *Controller) updateDownloadDir(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -148,8 +168,7 @@ func (c *Controller) updateDownloadDir(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		c.goTo(c.dlReturn)
 		return c, nil
 	case tea.KeyTab:
-		c.dlInput.SetValue(model.CompleteDir(c.dlInput.Value(), c.setup.Current, c.setup.Home))
-		c.dlInput.CursorEnd()
+		setInput(&c.dlInput, model.CompleteDir(c.dlInput.Value(), c.setup.Current, c.setup.Home))
 		c.clearMessages()
 		return c, nil
 	case tea.KeyEnter:
@@ -218,8 +237,7 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return c, tea.Quit
 		}
 		if msg.Type == tea.KeyCtrlD {
-			switch c.step {
-			case view.StepName, view.StepExt, view.StepSize, view.StepLocation, view.StepDone:
+			if canChangeDownloadDir(c.step) {
 				c.changeDownloadDir()
 			}
 			return c, nil
@@ -254,8 +272,9 @@ func (c *Controller) updateName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			c.errMsg = err.Error()
 			return c, nil
 		}
+		// A name such as "photo.jpeg" preselects its type unless one was typed.
 		if c.extInput.Value() == "" {
-			if f, ok := c.svc.Registry.Lookup(filepath.Ext(name)); ok && filepath.Ext(name) != "" {
+			if f, ok := c.svc.Registry.Lookup(filepath.Ext(name)); ok {
 				c.extInput.SetValue(f.Ext)
 				c.refreshMatches()
 			}
@@ -279,8 +298,7 @@ func (c *Controller) updateExt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return c, nil
 	case tea.KeyTab:
 		if len(c.matches) > 0 {
-			c.extInput.SetValue(c.matches[c.sel].Ext)
-			c.extInput.CursorEnd()
+			setInput(&c.extInput, c.matches[c.sel].Ext)
 			c.refreshMatches()
 		}
 		return c, nil
@@ -322,8 +340,7 @@ func (c *Controller) updateSize(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return c, nil
 	case tea.KeyTab:
 		if c.suggest >= 0 {
-			c.sizeInput.SetValue(strconv.FormatInt(c.suggest, 10))
-			c.sizeInput.CursorEnd()
+			setInput(&c.sizeInput, strconv.FormatInt(c.suggest, 10))
 			c.clearMessages()
 		}
 		return c, nil
@@ -337,14 +354,11 @@ func (c *Controller) updateSize(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			size = n
 		}
-		if err := c.format.Rule.Check(size); err != nil {
+		if err := c.format.CheckSize(size); err != nil {
+			c.errMsg = err.Error()
 			var se *model.SizeError
-			errors.As(err, &se)
-			se.Ext = c.format.Ext
-			c.errMsg = se.Error()
-			c.suggest = se.Above
-			if c.suggest < 0 {
-				c.suggest = se.Below
+			if errors.As(err, &se) {
+				c.suggest = se.Suggestion()
 			}
 			return c, nil
 		}
@@ -375,9 +389,9 @@ func (c *Controller) updateLocation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		c.locYes = true
 	case msg.Type == tea.KeyRight || msg.Type == tea.KeyDown || msg.Type == tea.KeyTab:
 		c.locYes = !c.locYes
-	case msg.String() == "y" || msg.String() == "Y":
+	case isKey(msg, "y"):
 		return c, c.chooseLocation(true)
-	case msg.String() == "n" || msg.String() == "N":
+	case isKey(msg, "n"):
 		return c, c.chooseLocation(false)
 	case msg.Type == tea.KeyEnter:
 		return c, c.chooseLocation(c.locYes)
@@ -402,7 +416,7 @@ func (c *Controller) confirmOrGenerate() tea.Cmd {
 		return nil
 	}
 	c.target = target
-	if _, err := os.Stat(target); err == nil {
+	if model.Exists(target) {
 		c.goTo(view.StepConfirm)
 		return nil
 	}
@@ -432,9 +446,9 @@ func (c *Controller) backFromGenerate() view.Step {
 
 func (c *Controller) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case msg.String() == "y" || msg.String() == "Y":
+	case isKey(msg, "y"):
 		return c, c.generate(true)
-	case msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || msg.String() == "n" || msg.String() == "N":
+	case msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || isKey(msg, "n"):
 		c.goTo(c.backFromGenerate())
 	}
 	return c, nil
@@ -444,7 +458,7 @@ func (c *Controller) updateDone(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyEnter:
 		c.reset()
-	case msg.Type == tea.KeyEsc || msg.String() == "q":
+	case msg.Type == tea.KeyEsc || isKey(msg, "q"):
 		return c, tea.Quit
 	}
 	return c, nil
@@ -484,21 +498,29 @@ func (c *Controller) clearMessages() {
 	c.suggest = -1
 }
 
+// input is the text input a step edits, or nil for steps without one.
+func (c *Controller) input(step view.Step) *textinput.Model {
+	switch step {
+	case view.StepName:
+		return &c.nameInput
+	case view.StepExt:
+		return &c.extInput
+	case view.StepSize:
+		return &c.sizeInput
+	case view.StepDownloadDir:
+		return &c.dlInput
+	}
+	return nil
+}
+
 func (c *Controller) goTo(step view.Step) {
 	c.step = step
 	c.clearMessages()
 	for _, in := range []*textinput.Model{&c.nameInput, &c.extInput, &c.sizeInput, &c.dlInput} {
 		in.Blur()
 	}
-	switch step {
-	case view.StepName:
-		c.nameInput.Focus()
-	case view.StepExt:
-		c.extInput.Focus()
-	case view.StepSize:
-		c.sizeInput.Focus()
-	case view.StepDownloadDir:
-		c.dlInput.Focus()
+	if in := c.input(step); in != nil {
+		in.Focus()
 	}
 }
 
@@ -534,7 +556,7 @@ func (c *Controller) State() view.State {
 		Ext: c.format.Ext, FormatName: c.format.Name, TargetPath: c.target,
 		Spinner:    c.spinner[c.frame%len(c.spinner)],
 		CurrentDir: c.setup.Current, DownloadDir: c.downloads, LocationYes: c.locYes,
-		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar, Plain: c.plain,
+		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar, Plain: c.setup.Plain,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note
@@ -542,11 +564,11 @@ func (c *Controller) State() view.State {
 	if c.suggest >= 0 {
 		s.Hint = fmt.Sprintf("tab: use %d bytes", c.suggest)
 	}
+	if in := c.input(c.step); in != nil {
+		s.Input = in.View()
+	}
 	switch c.step {
-	case view.StepName:
-		s.Input = c.nameInput.View()
 	case view.StepExt:
-		s.Input = c.extInput.View()
 		end := min(len(c.matches), c.offset+visibleSuggestions)
 		for i := c.offset; i < end; i++ {
 			f := c.matches[i]
@@ -556,10 +578,6 @@ func (c *Controller) State() view.State {
 			})
 		}
 		s.MoreSuggestions = len(c.matches) - (end - c.offset)
-	case view.StepSize:
-		s.Input = c.sizeInput.View()
-	case view.StepDownloadDir:
-		s.Input = c.dlInput.View()
 	case view.StepGenerating:
 		s.SizeLabel = model.HumanSize(c.size)
 	case view.StepDone:

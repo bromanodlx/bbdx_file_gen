@@ -52,7 +52,12 @@ func newHarness(t *testing.T) *harness {
 
 func newHarnessWith(t *testing.T, store *memStore) *harness {
 	t.Helper()
-	dir, home := t.TempDir(), t.TempDir()
+	return newHarnessAt(t, store, t.TempDir(), t.TempDir())
+}
+
+// newHarnessAt runs the controller with the given current and home directories.
+func newHarnessAt(t *testing.T, store *memStore, dir, home string) *harness {
+	t.Helper()
 	c := New(&model.Service{Registry: model.Default()}, Setup{
 		Current: dir, Home: home, Suggested: filepath.Join(home, "Downloads"), Store: store,
 	})

@@ -173,8 +173,8 @@ func avISOFile(b avBrand, jpegPad int) []byte {
 	return avConcat(ftyp, moov, avBox("mdat", jpeg))
 }
 
-func writeISO(w io.Writer, size int64, b avBrand, min int64) error {
-	pad := size - min
+func writeISO(w io.Writer, size int64, b avBrand, minSize int64) error {
+	pad := size - minSize
 	if pad < 8 {
 		_, err := w.Write(avISOFile(b, int(pad)))
 		return err

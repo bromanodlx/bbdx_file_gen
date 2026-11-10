@@ -40,8 +40,10 @@ but nothing is saved until you confirm.
 ## Build & run
 
 ```sh
-go build -o bbdx_file_gen .
-./bbdx_file_gen          # interactive TUI
+go build -o bbdx_file_gen .      # full name
+go build -o bbdxfg ./cmd/bbdxfg  # short name, the same tool
+go install . ./cmd/bbdxfg        # or install both into $GOBIN / ~/go/bin
+./bbdx_file_gen          # interactive TUI (or just: bbdxfg)
 ./bbdx_file_gen -list    # print all supported types with their minimum sizes
 ./bbdx_file_gen -download-dir ~/Downloads   # set the standard download directory
 ./bbdx_file_gen -plain   # ASCII-only, no-color interface for basic terminals
@@ -67,7 +69,9 @@ Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The 
 | **View** | `internal/view` | `Render(State) string` and `RenderList`. Pure functions with no state and no model access. The UI is a single rounded "card": a FIGlet "bbdx" banner heads the card, a progress rail tracks the four steps, the selected list row and location choice are highlighted, and keycap-styled shortcuts wrap underneath. It tracks the terminal width and degrades gracefully (compact rail, ellipsized rows) down to ~30 columns, and has an ASCII-only, colorless plain mode. |
 | **Controller** | `internal/controller` | Implements Bubble Tea's `tea.Model`. Translates key presses into model calls, runs generation asynchronously with a spinner, and builds the `view.State`. |
 
-`main.go` only wires the three together.
+`internal/cli` parses the command line and starts the TUI. `main.go` (`bbdx_file_gen`)
+and `cmd/bbdxfg` (`bbdxfg`) are one-line entry points into it, so both names accept the same
+flags and behave identically; messages name the command you typed.
 
 Generators stream their output and compute checksums (CRC-32, CRC-8/16, MD5)
 incrementally, so a 1 GiB file never sits in memory.
@@ -134,3 +138,9 @@ go test -short ./...   # quick suite
   unreachable sizes with the tab suggestion, aliases, both location answers, first-run and unreachable download directory, `ctrl+d` from every screen, back navigation, overwrite
   confirmation, errors and quitting.
 - **View tests** check the rendered content and that every line fits in a 40-column terminal.
+- **Golden tests** pin behavior byte for byte: a SHA-256 digest per format over
+  ~15 000 generated files (`internal/model/testdata`), every rendered screen
+  (`internal/view/testdata`), the controller's state after every key of 13 scripted
+  flows (`internal/controller/testdata`) and the `-list` output (`internal/cli/testdata`). After an
+  *intended* change, regenerate them with `go test ./... -run Golden -update` and
+  review the diff.

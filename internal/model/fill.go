@@ -52,20 +52,22 @@ func Lorem(w io.Writer, n int64, newlines bool) error {
 	if newlines {
 		block = loremLines
 	}
-	return repeatBlock(w, block, n)
+	return writeCycle(w, block, 0, n)
 }
 
 // Repeat writes n copies of b.
 func Repeat(w io.Writer, b byte, n int64) error {
-	return repeatBlock(w, bytes.Repeat([]byte{b}, 32<<10), n)
+	return writeCycle(w, bytes.Repeat([]byte{b}, 32<<10), 0, n)
 }
 
 // Zeros writes n zero bytes.
 func Zeros(w io.Writer, n int64) error { return Repeat(w, 0, n) }
 
-func repeatBlock(w io.Writer, block []byte, n int64) error {
+// writeCycle writes n bytes of block repeated endlessly, starting at byte off
+// of that repetition.
+func writeCycle(w io.Writer, block []byte, off, n int64) error {
 	for n > 0 {
-		chunk := block
+		chunk := block[off%int64(len(block)):]
 		if int64(len(chunk)) > n {
 			chunk = chunk[:n]
 		}
@@ -73,8 +75,22 @@ func repeatBlock(w io.Writer, block []byte, n int64) error {
 			return err
 		}
 		n -= int64(len(chunk))
+		off += int64(len(chunk))
 	}
 	return nil
+}
+
+// loremAt writes n bytes of the wrapped lorem text starting at offset off,
+// so that text split across several containers still reads continuously.
+func loremAt(w io.Writer, off, n int64) error { return writeCycle(w, loremLines, off, n) }
+
+// loremStream continues single-line Lorem text across several writes.
+type loremStream struct{ pos int64 }
+
+func (s *loremStream) write(w io.Writer, n int64) error {
+	err := writeCycle(w, loremSingle, s.pos, n)
+	s.pos += n
+	return err
 }
 
 // CountingWriter counts the bytes written through it; W may be nil.

@@ -1,3 +1,4 @@
 bbdx_file_gen
 *.tmp
 cover.out
+/bbdxfg

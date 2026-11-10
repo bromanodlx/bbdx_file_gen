@@ -159,6 +159,7 @@ var asciiGlyphs = glyphs{
 
 // Render draws the whole screen.
 func Render(s State) string {
+	s = s.sanitized()
 	g := unicodeGlyphs
 	if s.Plain {
 		g = asciiGlyphs
@@ -182,11 +183,11 @@ func Render(s State) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(topBorder(total, g) + "\n")
+	b.WriteString(border(g.tl, g.tr, total, g) + "\n")
 	for _, line := range body {
 		b.WriteString(bodyLine(line, inner, g) + "\n")
 	}
-	b.WriteString(bottomBorder(total, g) + "\n\n")
+	b.WriteString(border(g.bl, g.br, total, g) + "\n\n")
 	b.WriteString(helpBlock(s, total, g))
 
 	out := fit(b.String(), s.Width, g.ell)
@@ -315,7 +316,7 @@ func rail(cur Step, inner int, g glyphs) string {
 // row's category and minimum size and highlighting the selected entry.
 func suggestionRows(s State, inner int, g glyphs) []string {
 	if len(s.Suggestions) == 0 {
-		return []string{mutedSt.Render("  no matching file type — keep typing")}
+		return []string{mutedSt.Render("  no matching file type " + g.dash + " keep typing")}
 	}
 	out := make([]string, 0, len(s.Suggestions)+1)
 	for _, sg := range s.Suggestions {
@@ -343,16 +344,14 @@ func choiceRow(selected bool, label, dir string, inner int, g glyphs) string {
 	return "  " + label + mutedSt.Render("  "+g.arrow+" "+dir)
 }
 
-// pad joins a plain left and right segment flush to width w.
+// pad joins a plain left and right segment flush to exactly width w,
+// truncating with ell when they do not fit.
 func pad(left, right string, w int, ell string) string {
-	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
-	if gap < 2 {
-		return cell(left+"  "+right, w, ell)
-	}
-	return cell(left+strings.Repeat(" ", gap)+right, w, ell)
+	return cell(padStyled(left, right, w), w, ell)
 }
 
-// padStyled is pad for already-styled (ANSI-bearing) segments.
+// padStyled pushes right flush to width w, keeping at least two spaces after
+// left; the segments may carry ANSI styling.
 func padStyled(left, right string, w int) string {
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 2 {
@@ -363,12 +362,9 @@ func padStyled(left, right string, w int) string {
 
 // --- frame ---
 
-func topBorder(total int, g glyphs) string {
-	return frameSt.Render(g.tl + strings.Repeat(g.h, total-2) + g.tr)
-}
-
-func bottomBorder(total int, g glyphs) string {
-	return frameSt.Render(g.bl + strings.Repeat(g.h, total-2) + g.br)
+// border draws the card's top or bottom edge between two corner glyphs.
+func border(left, right string, total int, g glyphs) string {
+	return frameSt.Render(left + strings.Repeat(g.h, total-2) + right)
 }
 
 func bodyLine(content string, inner int, g glyphs) string {

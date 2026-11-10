@@ -1,0 +1,67 @@
+Archives & databases
+  gz      gzip        gzip compressed data       min 20 B
+  sqlite  sqlite3,db  SQLite 3 database          min 512 B
+  tar                 POSIX tar archive (ustar)  min 1 KiB
+  xz                  XZ compressed data         min 32 B
+  zip                 ZIP archive                min 22 B
+
+Audio
+  flac        Free Lossless Audio Codec  min 53 B
+  mid   midi  Standard MIDI File         min 26 B
+  mp3         MPEG-1 Audio Layer III     min 192 B
+  wav         Waveform Audio (PCM)       min 44 B
+
+Documents
+  docx            Microsoft Word document (OOXML)            min 1.43 KiB
+  epub            EPUB 3 e-book                              min 2 KiB
+  md    markdown  Markdown (CommonMark)                      min 17 B
+  odp             OpenDocument presentation                  min 2.62 KiB
+  ods             OpenDocument spreadsheet                   min 1.54 KiB
+  odt             OpenDocument text                          min 1.35 KiB
+  pdf             Portable Document Format 1.4               min 595 B
+  pptx            Microsoft PowerPoint presentation (OOXML)  min 8.91 KiB
+  rtf             Rich Text Format 1.9                       min 58 B
+  xlsx            Microsoft Excel workbook (OOXML)           min 2.22 KiB
+
+Images
+  bmp             Windows bitmap                         min 58 B
+  gif             Graphics Interchange Format (GIF89a)   min 35 B
+  ico             Windows icon (PNG payload)             min 92 B
+  jpg   jpeg,jpe  JPEG image (baseline JFIF-compatible)  min 141 B
+  png             Portable Network Graphics              min 70 B
+  svg             Scalable Vector Graphics 1.1           min 148 B
+  tiff  tif       Tagged Image File Format (baseline)    min 175 B
+  webp            WebP image (lossless)                  min 34 B
+
+Source code
+  c       C source (ISO C11)  min 88 B
+  java    Java source         min 127 B
+  php     PHP script          min 38 B
+  py      Python 3 source     min 54 B
+  sh      POSIX shell script  min 49 B
+  sql     SQL script          min 119 B
+
+Text & data
+  csv             Comma-separated values (RFC 4180)  min 20 B
+  ics   ical      iCalendar (RFC 5545)               min 229 B
+  ini   cfg,conf  INI configuration                  min 35 B
+  json            JSON (RFC 8259)                    min 15 B
+  log             Log file                           min 28 B
+  txt   text      Plain text                         min 0 B
+  vcf   vcard     vCard 4.0 (RFC 6350)               min 63 B
+  xml             XML 1.0 document                   min 59 B
+  yaml  yml       YAML 1.2 document                  min 16 B
+
+Video
+  avi        Audio Video Interleave (uncompressed RGB)  min 260 B
+  mkv        Matroska Video (Motion JPEG)               min 303 B
+  mov        QuickTime Movie (Photo JPEG)               min 740 B
+  mp4   m4v  MPEG-4 Part 14 (Motion JPEG)               min 783 B
+  webm       WebM (Opus audio track)                    min 192 B
+
+Web
+  css        Cascading Style Sheet    min 27 B
+  html  htm  HTML5 document           min 132 B
+  js    mjs  JavaScript (ECMAScript)  min 38 B
+
+50 file types

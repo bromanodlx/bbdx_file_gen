@@ -47,121 +47,42 @@ func archiveFormats() []Format {
 	}
 }
 
-// loremAt writes n bytes of the wrapped lorem text starting at offset off,
-// so that text split across several containers still reads continuously.
-func loremAt(w io.Writer, off, n int64) error {
-	block := loremLines
-	for n > 0 {
-		start := off % int64(len(block))
-		chunk := block[start:]
-		if int64(len(chunk)) > n {
-			chunk = chunk[:n]
-		}
-		if _, err := w.Write(chunk); err != nil {
-			return err
-		}
-		n -= int64(len(chunk))
-		off += int64(len(chunk))
-	}
-	return nil
-}
-
 func loremCRC(n int64) uint32 {
 	h := crc32.NewIEEE()
 	_ = loremAt(h, 0, n)
 	return h.Sum32()
 }
 
-// binWriter accumulates little/big endian fields.
-type binWriter struct{ bytes.Buffer }
-
-func (b *binWriter) u8(v uint8)    { b.WriteByte(v) }
-func (b *binWriter) le16(v uint16) { b.Write(binary.LittleEndian.AppendUint16(nil, v)) }
-func (b *binWriter) le32(v uint32) { b.Write(binary.LittleEndian.AppendUint32(nil, v)) }
-func (b *binWriter) be16(v uint16) { b.Write(binary.BigEndian.AppendUint16(nil, v)) }
-func (b *binWriter) be32(v uint32) { b.Write(binary.BigEndian.AppendUint32(nil, v)) }
-func (b *binWriter) str(s string)  { b.WriteString(s) }
-func (b *binWriter) to(w io.Writer) error {
-	_, err := w.Write(b.Bytes())
-	return err
-}
-
 // ---------------------------------------------------------------- ZIP
 
 const (
-	zipEOCDLen     = 22
 	zipMemberName  = "bbdx.txt"
-	zipMemberFixed = 30 + len(zipMemberName) + 46 + len(zipMemberName) + zipEOCDLen
+	zipMemberFixed = zipLocalHeaderLen + len(zipMemberName) + zipCentralHeaderLen + len(zipMemberName) + zipEOCDLen
 )
 
 // writeZIP emits an archive with one stored text member whenever it fits;
 // smaller sizes are an empty archive whose EOCD comment absorbs the rest.
 func writeZIP(w io.Writer, size int64) error {
-	dosTime := uint16(0)
-	dosDate := uint16((archiveEpoch.Year()-1980)<<9 | int(archiveEpoch.Month())<<5 | archiveEpoch.Day())
-	eocd := func(entries uint16, cdSize, cdOff uint32, commentLen int) *binWriter {
-		var b binWriter
-		b.le32(0x06054b50)
-		b.le16(0)
-		b.le16(0)
-		b.le16(entries)
-		b.le16(entries)
-		b.le32(cdSize)
-		b.le32(cdOff)
-		b.le16(uint16(commentLen))
-		return &b
-	}
-	if pad := size - zipEOCDLen; size < int64(zipMemberFixed) {
-		if err := eocd(0, 0, 0, int(pad)).to(w); err != nil {
-			return err
-		}
-		return Lorem(w, pad, false)
+	b := &binw{w: w}
+	if size < int64(zipMemberFixed) {
+		pad := size - zipEOCDLen
+		b.raw(zipEOCD(0, 0, 0, uint16(pad))...)
+		b.do(func(w io.Writer) error { return Lorem(w, pad, false) })
+		return b.err
 	}
 	n := size - int64(zipMemberFixed)
-	crc := loremCRC(n)
-	var lh binWriter
-	lh.le32(0x04034b50)
-	lh.le16(10) // version needed: 1.0 (stored)
-	lh.le16(0)
-	lh.le16(0) // method: stored
-	lh.le16(dosTime)
-	lh.le16(dosDate)
-	lh.le32(crc)
-	lh.le32(uint32(n))
-	lh.le32(uint32(n))
-	lh.le16(uint16(len(zipMemberName)))
-	lh.le16(0)
-	lh.str(zipMemberName)
-	if err := lh.to(w); err != nil {
-		return err
+	e := zipEntry{
+		name: zipMemberName, crc: loremCRC(n), size: uint32(n),
+		madeBy:       3<<8 | 20, // UNIX, spec 2.0
+		internalAttr: 1,         // text file
+		externalAttr: 0o100644 << 16,
 	}
-	if err := loremAt(w, 0, n); err != nil {
-		return err
-	}
-	var cd binWriter
-	cd.le32(0x02014b50)
-	cd.le16(3<<8 | 20) // made by: UNIX, spec 2.0
-	cd.le16(10)
-	cd.le16(0)
-	cd.le16(0)
-	cd.le16(dosTime)
-	cd.le16(dosDate)
-	cd.le32(crc)
-	cd.le32(uint32(n))
-	cd.le32(uint32(n))
-	cd.le16(uint16(len(zipMemberName)))
-	cd.le16(0)
-	cd.le16(0)
-	cd.le16(0)
-	cd.le16(1)              // internal attributes: text file
-	cd.le32(0o100644 << 16) // external attributes: regular file rw-r--r--
-	cd.le32(0)
-	cd.str(zipMemberName)
-	if err := cd.to(w); err != nil {
-		return err
-	}
-	cdOff := uint32(int64(lh.Len()) + n)
-	return eocd(1, uint32(cd.Len()), cdOff, 0).to(w)
+	lh, cd := zipLocalHeader(e), zipCentralHeader(e)
+	b.raw(lh...)
+	b.do(func(w io.Writer) error { return loremAt(w, 0, n) })
+	b.raw(cd...)
+	b.raw(zipEOCD(1, uint32(len(cd)), uint32(int64(len(lh))+n), 0)...)
+	return b.err
 }
 
 // ---------------------------------------------------------------- GZIP
@@ -172,34 +93,25 @@ const gzMin = 10 + 2 + 8 // header + empty fixed-Huffman block + trailer
 // reached with an FCOMMENT field; everything else uses stored deflate blocks
 // carrying lorem text.
 func writeGZ(w io.Writer, size int64) error {
-	var hdr binWriter
-	hdr.u8(0x1f)
-	hdr.u8(0x8b)
-	hdr.u8(8) // deflate
-	flags := uint8(0)
-	if size == gzMin+1 || size == gzMin+2 {
-		flags = 0x10 // FCOMMENT
+	b := &binw{w: w}
+	b.raw(0x1f, 0x8b, 8) // magic, deflate
+	comment := size == gzMin+1 || size == gzMin+2
+	if comment {
+		b.raw(0x10) // FCOMMENT
+	} else {
+		b.raw(0)
 	}
-	hdr.u8(flags)
-	hdr.le32(uint32(archiveEpoch.Unix()))
-	hdr.u8(0)
-	hdr.u8(3) // OS: Unix
-	if flags != 0 {
-		comment := size - gzMin - 1
-		hdr.Write(bytes.Repeat([]byte("x"), int(comment)))
-		hdr.u8(0)
+	b.u32le(uint32(archiveEpoch.Unix()))
+	b.raw(0, 3) // no extra flags, OS: Unix
+	if comment {
+		b.raw(bytes.Repeat([]byte("x"), int(size-gzMin-1))...)
+		b.raw(0)
 	}
-	if err := hdr.to(w); err != nil {
-		return err
-	}
-	var trailer binWriter
 	if size <= gzMin+2 {
-		if _, err := w.Write([]byte{0x03, 0x00}); err != nil { // final empty fixed block
-			return err
-		}
-		trailer.le32(0)
-		trailer.le32(0)
-		return trailer.to(w)
+		b.raw(0x03, 0x00) // final empty fixed block
+		b.u32le(0)        // CRC-32
+		b.u32le(0)        // input size
+		return b.err
 	}
 	deflated := size - 18
 	blocks := (deflated + 65539) / 65540
@@ -216,21 +128,15 @@ func writeGZ(w io.Writer, size int64) error {
 		if i == blocks-1 {
 			final = 1
 		}
-		var bh binWriter
-		bh.u8(final) // BFINAL + BTYPE=00 (stored)
-		bh.le16(uint16(n))
-		bh.le16(^uint16(n))
-		if err := bh.to(w); err != nil {
-			return err
-		}
-		if err := loremAt(out, off, n); err != nil {
-			return err
-		}
+		b.raw(final) // BFINAL + BTYPE=00 (stored)
+		b.u16le(uint16(n))
+		b.u16le(^uint16(n))
+		b.do(func(io.Writer) error { return loremAt(out, off, n) })
 		off += n
 	}
-	trailer.le32(h.Sum32())
-	trailer.le32(uint32(data))
-	return trailer.to(w)
+	b.u32le(h.Sum32())
+	b.u32le(uint32(data))
+	return b.err
 }
 
 // ---------------------------------------------------------------- TAR
@@ -335,11 +241,8 @@ func writeXZ(w io.Writer, size int64) error {
 	_, _, smallest := xzLayout(1)
 	if size < smallest {
 		idx := xzIndex(nil)
-		parts := [][]byte{xzStreamHeader(), idx, xzStreamFooter(int64(len(idx)))}
-		for _, p := range parts {
-			if _, err := w.Write(p); err != nil {
-				return err
-			}
+		if err := avWrite(w, xzStreamHeader(), idx, xzStreamFooter(int64(len(idx)))); err != nil {
+			return err
 		}
 		return Zeros(w, size-xzEmptyStreamLen)
 	}

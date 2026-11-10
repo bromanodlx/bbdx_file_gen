@@ -154,3 +154,64 @@ func TestSetDownloadDir(t *testing.T) {
 		t.Errorf("a failed change must keep the old value, got %q", cfg.DownloadDir)
 	}
 }
+
+// Completion reads its input with ResolveDir's rules, so text produced by a
+// previous completion (escapes) and other bash-like spellings keep working.
+func TestCompleteDirUnderstandsEscapesQuotesAndVariables(t *testing.T) {
+	cwd, home := t.TempDir(), t.TempDir()
+	for _, d := range []string{"my dir/subdir", `it's "q"/inner`, "plain/alpha", "plain/alpine"} {
+		if err := os.MkdirAll(filepath.Join(cwd, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.MkdirAll(filepath.Join(home, "docs", "letters"), 0o755)
+	t.Setenv("BBDX_TEST_DIR", filepath.Join(cwd, "my dir"))
+	for in, want := range map[string]string{
+		"my":                     `my\ dir/`,
+		`my\ dir/`:               `my\ dir/subdir/`,
+		`my\ dir/su`:             `my\ dir/subdir/`,
+		`"my dir"/su`:            `"my dir"/subdir/`,
+		`'my dir'/su`:            `'my dir'/subdir/`,
+		`my\ d`:                  `my\ dir/`,
+		`"my d`:                  `"my d`, // unterminated quote: left alone
+		`$BBDX_TEST_DIR/su`:      `$BBDX_TEST_DIR/subdir/`,
+		`${BBDX_TEST_DIR}/`:      `${BBDX_TEST_DIR}/subdir/`,
+		"it":                     `it\'s\ \"q\"/`,
+		`it\'s\ \"q\"/in`:        `it\'s\ \"q\"/inner/`,
+		"~/do":                   "~/docs/",
+		"$HOME/docs/l":           "$HOME/docs/letters/",
+		"plain/al":               "plain/alp",
+		"plain/alp":              "plain/alp", // ambiguous, nothing more in common
+		"~nobody/x":              "~nobody/x",
+		filepath.Join(cwd, "pl"): filepath.Join(cwd, "plain") + "/",
+	} {
+		if got := CompleteDir(in, cwd, home); got != want {
+			t.Errorf("CompleteDir(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Whatever completion produces resolves to the directory it names.
+	got, err := ResolveDir(CompleteDir(`it\'s\ \"q\"/in`, cwd, home), cwd, home)
+	if err != nil || got != filepath.Join(cwd, `it's "q"`, "inner") {
+		t.Errorf("completion does not round-trip: %q, %v", got, err)
+	}
+}
+
+func TestConfigStoreSaveIsPrivateAndLeavesNoTemp(t *testing.T) {
+	dir := t.TempDir()
+	s := ConfigStore{Path: filepath.Join(dir, "sub", "config.json")}
+	for _, d := range []string{"/a", "/b"} { // the second save replaces the first
+		if err := s.Save(Config{DownloadDir: d}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := s.Load()
+	st, _ := os.Stat(s.Path)
+	if err != nil || cfg.DownloadDir != "/b" || st.Mode().Perm() != 0o600 {
+		t.Errorf("cfg %+v, err %v, mode %v", cfg, err, st.Mode().Perm())
+	}
+	data, _ := os.ReadFile(s.Path)
+	if string(data) != "{\n  \"download_dir\": \"/b\"\n}\n" {
+		t.Errorf("config file format changed: %q", data)
+	}
+	noTempFiles(t, filepath.Dir(s.Path))
+}

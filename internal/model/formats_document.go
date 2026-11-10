@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -87,20 +86,19 @@ func writePDFComment(w io.Writer, n int64) error {
 		_, err := io.WriteString(w, "\n")
 		return err
 	}
-	pos := 0
+	text := &loremStream{}
 	for n > 0 {
 		l := min(n, 80)
 		if n-l == 1 {
-			l--
+			l-- // a comment line needs at least "%" and "\n"
 		}
-		line := make([]byte, 0, l)
-		line = append(line, '%')
-		for int64(len(line)) < l-1 {
-			line = append(line, loremSingle[pos%len(loremSingle)])
-			pos++
+		if _, err := io.WriteString(w, "%"); err != nil {
+			return err
 		}
-		line = append(line, '\n')
-		if _, err := w.Write(line); err != nil {
+		if err := text.write(w, l-2); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, "\n"); err != nil {
 			return err
 		}
 		n -= l
@@ -109,15 +107,15 @@ func writePDFComment(w io.Writer, n int64) error {
 }
 
 func pdfFormat() Format {
-	min := int64(-1)
-	for s := int64(0); min < 0; s++ {
+	minSize := int64(-1)
+	for s := int64(0); minSize < 0; s++ {
 		if _, _, ok := pdfLayout(s); ok {
-			min = s
+			minSize = s
 		}
 	}
 	return Format{
 		Ext: "pdf", Name: "Portable Document Format 1.4", MIME: "application/pdf",
-		Category: CategoryDocument, Rule: SizeRule{Min: min},
+		Category: CategoryDocument, Rule: SizeRule{Min: minSize},
 		Write: func(w io.Writer, size int64) error {
 			pad, eol, ok := pdfLayout(size)
 			if !ok {
@@ -193,20 +191,11 @@ func (p docPart) writeFilled(w io.Writer, k int, text int64) error {
 	return err
 }
 
-const (
-	zipLocalHeader   = 30
-	zipCentralHeader = 46
-	zipEOCD          = 22
-	// 2026-01-01 00:00:00 in MS-DOS format.
-	zipDosDate = (2026-1980)<<9 | 1<<5 | 1
-	zipDosTime = 0
-)
-
 // fixedSize is the archive size excluding the filled part's data.
 func (pkg docPackage) fixedSize() int64 {
-	n := int64(zipEOCD)
+	n := int64(zipEOCDLen)
 	for _, p := range pkg {
-		n += int64(zipLocalHeader + zipCentralHeader + 2*len(p.Name))
+		n += int64(zipLocalHeaderLen + zipCentralHeaderLen + 2*len(p.Name))
 		if !p.Filled {
 			n += int64(len(p.Data))
 		}
@@ -242,77 +231,33 @@ func (pkg docPackage) write(w io.Writer, size int64) error {
 	if !ok {
 		return fmt.Errorf("size %d below minimum", size)
 	}
-	type entry struct {
-		name      string
-		crc, size uint32
-		offset    uint32
-	}
-	var entries []entry
+	b := &binw{w: w}
+	var entries []zipEntry
 	var offset int64
 	for _, p := range pkg {
-		var crc uint32
-		var n int64
+		e := zipEntry{name: p.Name, offset: uint32(offset), madeBy: 20} // MS-DOS, spec 2.0
+		content := func(w io.Writer) error { _, err := io.WriteString(w, p.Data); return err }
 		if p.Filled {
-			h := crc32.NewIEEE()
-			cw := &CountingWriter{W: h}
-			if err := p.writeFilled(cw, k, text); err != nil {
-				return err
-			}
-			crc, n = h.Sum32(), cw.N
-		} else {
-			crc, n = crc32.ChecksumIEEE([]byte(p.Data)), int64(len(p.Data))
+			content = func(w io.Writer) error { return p.writeFilled(w, k, text) }
 		}
-		e := entry{name: p.Name, crc: crc, size: uint32(n), offset: uint32(offset)}
+		h := crc32.NewIEEE()
+		cw := &CountingWriter{W: h}
+		if err := content(cw); err != nil {
+			return err
+		}
+		e.crc, e.size = h.Sum32(), uint32(cw.N)
 		entries = append(entries, e)
-		hdr := make([]byte, zipLocalHeader)
-		binary.LittleEndian.PutUint32(hdr[0:], 0x04034b50)
-		binary.LittleEndian.PutUint16(hdr[4:], 10) // version needed: stored
-		binary.LittleEndian.PutUint16(hdr[10:], zipDosTime)
-		binary.LittleEndian.PutUint16(hdr[12:], zipDosDate)
-		binary.LittleEndian.PutUint32(hdr[14:], e.crc)
-		binary.LittleEndian.PutUint32(hdr[18:], e.size)
-		binary.LittleEndian.PutUint32(hdr[22:], e.size)
-		binary.LittleEndian.PutUint16(hdr[26:], uint16(len(p.Name)))
-		if _, err := w.Write(append(hdr, p.Name...)); err != nil {
-			return err
-		}
-		var err error
-		if p.Filled {
-			err = p.writeFilled(w, k, text)
-		} else {
-			_, err = io.WriteString(w, p.Data)
-		}
-		if err != nil {
-			return err
-		}
-		offset += int64(zipLocalHeader+len(p.Name)) + n
+		b.raw(zipLocalHeader(e)...)
+		b.do(content)
+		offset += int64(zipLocalHeaderLen+len(p.Name)) + cw.N
 	}
 	cdStart := offset
 	for _, e := range entries {
-		hdr := make([]byte, zipCentralHeader)
-		binary.LittleEndian.PutUint32(hdr[0:], 0x02014b50)
-		binary.LittleEndian.PutUint16(hdr[4:], 20) // made by: MS-DOS, spec 2.0
-		binary.LittleEndian.PutUint16(hdr[6:], 10)
-		binary.LittleEndian.PutUint16(hdr[12:], zipDosTime)
-		binary.LittleEndian.PutUint16(hdr[14:], zipDosDate)
-		binary.LittleEndian.PutUint32(hdr[16:], e.crc)
-		binary.LittleEndian.PutUint32(hdr[20:], e.size)
-		binary.LittleEndian.PutUint32(hdr[24:], e.size)
-		binary.LittleEndian.PutUint16(hdr[28:], uint16(len(e.name)))
-		binary.LittleEndian.PutUint32(hdr[42:], e.offset)
-		if _, err := w.Write(append(hdr, e.name...)); err != nil {
-			return err
-		}
-		offset += int64(zipCentralHeader + len(e.name))
+		b.raw(zipCentralHeader(e)...)
+		offset += int64(zipCentralHeaderLen + len(e.name))
 	}
-	eocd := make([]byte, zipEOCD)
-	binary.LittleEndian.PutUint32(eocd[0:], 0x06054b50)
-	binary.LittleEndian.PutUint16(eocd[8:], uint16(len(entries)))
-	binary.LittleEndian.PutUint16(eocd[10:], uint16(len(entries)))
-	binary.LittleEndian.PutUint32(eocd[12:], uint32(offset-cdStart))
-	binary.LittleEndian.PutUint32(eocd[16:], uint32(cdStart))
-	_, err := w.Write(eocd)
-	return err
+	b.raw(zipEOCD(uint16(len(entries)), uint32(offset-cdStart), uint32(cdStart), 0)...)
+	return b.err
 }
 
 func zipDocFormat(ext, name, mime string, pkg docPackage) Format {

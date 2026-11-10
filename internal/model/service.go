@@ -68,73 +68,77 @@ func FileName(name, ext string) string {
 // TargetPath resolves the final path for name and ext; relative names are
 // placed in dir.
 func (s *Service) TargetPath(dir, name, ext string) (string, error) {
+	_, path, err := s.resolve(dir, name, ext)
+	return path, err
+}
+
+// resolve validates name, looks up the format for ext and builds the path.
+func (s *Service) resolve(dir, name, ext string) (Format, string, error) {
 	if err := ValidateName(name); err != nil {
-		return "", err
+		return Format{}, "", err
 	}
 	f, ok := s.Registry.Lookup(ext)
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrUnknownFormat, NormalizeExt(ext))
+		return Format{}, "", fmt.Errorf("%w: %q", ErrUnknownFormat, NormalizeExt(ext))
 	}
 	p := FileName(name, f.Ext)
 	if !filepath.IsAbs(p) && dir != "" {
 		p = filepath.Join(dir, p)
 	}
-	return p, nil
+	return f, p, nil
+}
+
+// payload is what Create writes: size bytes produced by write.
+type payload struct {
+	size  int64
+	eicar bool
+	write func(io.Writer) error
+}
+
+// plan decides the content of the requested file. An "eicar" name produces
+// the EICAR test string at its natural 68 bytes, regardless of the format's
+// size rule or any requested size; otherwise the format is generated at the
+// requested size, or at its minimum when none is given.
+func plan(f Format, req Request) (payload, error) {
+	if IsEICARName(req.Name) {
+		return payload{size: int64(len(EICAR)), eicar: true, write: func(w io.Writer) error {
+			_, err := io.WriteString(w, EICAR)
+			return err
+		}}, nil
+	}
+	size := f.Rule.Min
+	if req.Size != nil {
+		size = *req.Size
+	}
+	if err := f.CheckSize(size); err != nil {
+		return payload{}, err
+	}
+	return payload{size: size, write: func(w io.Writer) error { return f.Generate(w, size) }}, nil
 }
 
 // Create generates the requested file. The file is written to a temporary
 // name first and renamed into place, so failures never leave partial files.
+// Unless req.Overwrite is set, an existing file is never replaced.
 func (s *Service) Create(req Request) (Result, error) {
-	path, err := s.TargetPath(req.Dir, req.Name, req.Ext)
+	f, path, err := s.resolve(req.Dir, req.Name, req.Ext)
 	if err != nil {
 		return Result{}, err
 	}
-	f, _ := s.Registry.Lookup(req.Ext)
-
-	// An "eicar" name produces the EICAR test string at its natural 68 bytes,
-	// regardless of the format's size rule or any requested size.
-	eicar := IsEICARName(req.Name)
-	size := f.Rule.Min
-	switch {
-	case eicar:
-		size = int64(len(EICAR))
-	case req.Size != nil:
-		size = *req.Size
+	p, err := plan(f, req)
+	if err != nil {
+		return Result{}, err
 	}
-	if !eicar {
-		if err := f.Rule.Check(size); err != nil {
-			err.(*SizeError).Ext = f.Ext
-			return Result{}, err
-		}
-	}
-	if _, err := os.Stat(path); err == nil && !req.Overwrite {
+	// Checked up front so a large file is not generated only to be discarded;
+	// writeFileAtomic enforces it again when the file is put in place.
+	if !req.Overwrite && Exists(path) {
 		return Result{}, fmt.Errorf("%w: %s", ErrExists, path)
 	}
 	dir := filepath.Dir(path)
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 		return Result{}, fmt.Errorf("directory %q does not exist", dir)
 	}
-	tmp, err := os.CreateTemp(dir, ".bbdx-*.tmp")
-	if err != nil {
+	if err := writeFileAtomic(path, ".bbdx-*.tmp", 0o644, !req.Overwrite, p.write); err != nil {
 		return Result{}, err
 	}
-	defer os.Remove(tmp.Name()) // no-op after a successful rename
-	write := func(w io.Writer) error { return f.Generate(w, size) }
-	if eicar {
-		write = func(w io.Writer) error { _, err := io.WriteString(w, EICAR); return err }
-	}
-	if err := write(tmp); err != nil {
-		tmp.Close()
-		return Result{}, err
-	}
-	if err := tmp.Close(); err != nil {
-		return Result{}, err
-	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		return Result{}, err
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return Result{}, err
-	}
-	return Result{Path: path, Size: size, Format: f, EICAR: eicar}, nil
+	return Result{Path: path, Size: p.size, Format: f, EICAR: p.eicar}, nil
 }

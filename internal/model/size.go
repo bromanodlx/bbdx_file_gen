@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -192,8 +191,11 @@ func (e *SizeError) Error() string {
 	return msg
 }
 
-// IsSizeError reports whether err is (or wraps) a *SizeError.
-func IsSizeError(err error) bool {
-	var se *SizeError
-	return errors.As(err, &se)
+// Suggestion is the nearest valid size to offer instead of the requested one:
+// the next larger size, else the next smaller one, else -1.
+func (e *SizeError) Suggestion() int64 {
+	if e.Above >= 0 {
+		return e.Above
+	}
+	return e.Below
 }
