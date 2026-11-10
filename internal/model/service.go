@@ -16,11 +16,9 @@ var (
 // Request describes one file to generate.
 type Request struct {
 	// Dir is the base directory for relative names ("" = working directory).
-	Dir string
-	// MakeDir creates Dir if it does not exist yet (e.g. the Downloads folder).
-	MakeDir bool
-	Name    string
-	Ext     string
+	Dir  string
+	Name string
+	Ext  string
 	// Size is the exact size in bytes; nil means the format's minimum.
 	Size      *int64
 	Overwrite bool
@@ -96,11 +94,6 @@ func (s *Service) Create(req Request) (Result, error) {
 	if err := f.Rule.Check(size); err != nil {
 		err.(*SizeError).Ext = f.Ext
 		return Result{}, err
-	}
-	if req.MakeDir && req.Dir != "" && !filepath.IsAbs(strings.TrimSpace(req.Name)) {
-		if err := os.MkdirAll(req.Dir, 0o755); err != nil {
-			return Result{}, err
-		}
 	}
 	if _, err := os.Stat(path); err == nil && !req.Overwrite {
 		return Result{}, fmt.Errorf("%w: %s", ErrExists, path)

@@ -8,10 +8,10 @@ import (
 	"strings"
 )
 
-// DownloadDir returns the user's standard download directory: $XDG_DOWNLOAD_DIR,
+// SuggestDownloadDir proposes the user's standard download directory: $XDG_DOWNLOAD_DIR,
 // else XDG_DOWNLOAD_DIR from user-dirs.dirs (localized names such as
 // ~/Herunterladen), else ~/Downloads.
-func DownloadDir() (string, error) {
+func SuggestDownloadDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

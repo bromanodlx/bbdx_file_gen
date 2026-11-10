@@ -139,21 +139,13 @@ func TestServiceTargetPathIgnoresDirForAbsoluteNames(t *testing.T) {
 	}
 }
 
-func TestServiceCreateMakesBaseDirOnlyWhenAsked(t *testing.T) {
+func TestServiceCreateNeverCreatesDirectories(t *testing.T) {
 	svc, dir := newTestService(t)
 	missing := filepath.Join(dir, "Downloads")
 	if _, err := svc.Create(Request{Dir: missing, Name: "a", Ext: "txt"}); err == nil {
-		t.Fatal("a missing directory must not be created implicitly")
+		t.Fatal("a missing directory must be reported, not created")
 	}
-	res, err := svc.Create(Request{Dir: missing, MakeDir: true, Name: "a", Ext: "txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Path != filepath.Join(missing, "a.txt") {
-		t.Errorf("path = %q", res.Path)
-	}
-	// MakeDir creates the base directory, not directories inside the name
-	if _, err := svc.Create(Request{Dir: missing, MakeDir: true, Name: "sub/a", Ext: "txt"}); err == nil {
-		t.Error("sub directories of the name must not be created")
+	if _, err := os.Stat(missing); err == nil {
+		t.Error("directory was created")
 	}
 }

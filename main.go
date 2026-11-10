@@ -20,6 +20,7 @@ const version = "1.0.0"
 func main() {
 	list := flag.Bool("list", false, "list supported file types and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	setDownloads := flag.String("download-dir", "", "set the standard download directory (absolute or relative path) and exit")
 	flag.Parse()
 
 	reg := model.Default()
@@ -36,11 +37,29 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	downloads, err := model.DownloadDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		fail(err)
 	}
-	ctrl := controller.New(&model.Service{Registry: reg}, controller.Locations{Current: cwd, Downloads: downloads})
+	cfgPath, err := model.DefaultConfigPath()
+	if err != nil {
+		fail(err)
+	}
+	store := model.ConfigStore{Path: cfgPath}
+
+	if *setDownloads != "" {
+		dir, err := model.SetDownloadDir(store, *setDownloads, cwd, home)
+		if err != nil {
+			fail(err)
+		}
+		fmt.Println("standard download directory set to", dir)
+		return
+	}
+
+	suggested, _ := model.SuggestDownloadDir() // only a proposal for the setup screen
+	ctrl := controller.New(&model.Service{Registry: reg}, controller.Setup{
+		Current: cwd, Home: home, Suggested: suggested, Store: store,
+	})
 	if _, err := tea.NewProgram(ctrl, tea.WithAltScreen()).Run(); err != nil {
 		fail(err)
 	}

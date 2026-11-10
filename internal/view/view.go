@@ -21,6 +21,9 @@ const (
 	StepConfirm
 	StepGenerating
 	StepDone
+	// StepDownloadDir is the settings screen for the standard download
+	// directory; it is not one of the numbered wizard steps.
+	StepDownloadDir
 )
 
 // Suggestion is one entry of the file type list.
@@ -52,6 +55,9 @@ type State struct {
 	DownloadDir string
 	LocationYes bool // "Yes" (current directory) is highlighted
 
+	DownloadReason string // why the download directory is being asked for
+	DownloadCancel bool   // esc returns instead of quitting
+
 	SizeLabel string // human readable size of the file being/just generated
 	Bytes     int64
 	Spinner   string
@@ -79,9 +85,21 @@ var (
 func Render(s State) string {
 	var b strings.Builder
 	b.WriteString(titleSt.Render("bbdx_file_gen") + mutedSt.Render("  standard-compliant test files") + "\n")
-	b.WriteString(steps(s.Step) + "\n\n")
+	if s.Step == StepDownloadDir {
+		b.WriteString(activeSt.Render("Settings") + "\n\n")
+	} else {
+		b.WriteString(steps(s.Step) + "\n\n")
+	}
 
 	switch s.Step {
+	case StepDownloadDir:
+		b.WriteString(labelSt.Render("Standard download directory") + "\n")
+		if s.DownloadReason != "" {
+			b.WriteString(s.DownloadReason + "\n")
+		}
+		b.WriteString(s.Input + "\n")
+		b.WriteString(mutedSt.Render("Paths work like in bash: absolute (/data/dl), relative to the current") + "\n")
+		b.WriteString(mutedSt.Render("directory (../dl), ~, $VARIABLES, quotes and \\ escapes.") + "\n")
 	case StepName:
 		b.WriteString(labelSt.Render("File name") + "\n")
 		b.WriteString(s.Input + "\n")
@@ -118,7 +136,7 @@ func Render(s State) string {
 	if s.Hint != "" {
 		b.WriteString(activeSt.Render(s.Hint) + "\n")
 	}
-	b.WriteString("\n" + mutedSt.Render(help(s.Step)))
+	b.WriteString("\n" + mutedSt.Render(help(s)))
 	return fit(b.String(), s.Width)
 }
 
@@ -169,22 +187,28 @@ func choice(selected bool, label, dir string) string {
 	return "  " + label + mutedSt.Render("  → "+dir)
 }
 
-func help(step Step) string {
-	switch step {
+func help(s State) string {
+	const dl = " · ctrl+d download dir"
+	switch s.Step {
 	case StepName:
-		return "enter next · esc/ctrl+c quit"
+		return "enter next" + dl + " · esc/ctrl+c quit"
 	case StepExt:
-		return "enter select · tab complete · ↑/↓ choose · esc back · ctrl+c quit"
+		return "enter select · tab complete · ↑/↓ choose · esc back" + dl + " · ctrl+c quit"
 	case StepSize:
-		return "enter next · tab apply suggestion · esc back · ctrl+c quit"
+		return "enter next · tab apply suggestion · esc back" + dl + " · ctrl+c quit"
 	case StepLocation:
-		return "y/n answer · ←/→ choose · enter confirm · esc back · ctrl+c quit"
+		return "y/n answer · ←/→ choose · enter confirm · esc back" + dl + " · ctrl+c quit"
 	case StepConfirm:
 		return "y overwrite · n/esc back"
 	case StepGenerating:
 		return "please wait…"
+	case StepDownloadDir:
+		if s.DownloadCancel {
+			return "enter save · tab complete · esc cancel · ctrl+c quit"
+		}
+		return "enter save · tab complete · esc quit"
 	default:
-		return "enter create another · q quit"
+		return "enter create another" + dl + " · q quit"
 	}
 }
 

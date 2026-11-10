@@ -7,18 +7,25 @@ It asks four questions:
 2. **File type**: an extension or alias, e.g. `pdf`, `.JPEG`, `yml`. A live, filterable list is shown.
 3. **Size**: e.g. `2048`, `64KiB`, `1.5MB`. Leave it empty to get the smallest standard-compliant file of that type.
 4. **Location**: *Create the file in the current directory?* **Yes** puts it in the
-   current directory, **No** puts it in your standard download folder. The download
-   folder comes from `$XDG_DOWNLOAD_DIR`, then `XDG_DOWNLOAD_DIR` in
-   `~/.config/user-dirs.dirs` (so localized names like `~/Herunterladen` work),
-   then `~/Downloads`. It is created if it doesn't exist. Absolute names such as
-   `/tmp/x` skip this question.
+   current directory, **No** puts it in your standard download directory. Absolute
+   names such as `/tmp/x` skip this question.
 
-Every generated file is a real, valid file of its type: PDFs open, images decode,
-media plays, archives test OK, and source files compile or run. It is also
-exactly the requested number of bytes. Padding always goes into a structure the
-format defines for it, such as comments, padding blocks, `free` boxes, `JUNK`
-chunks, stored archive members or document text. It is never junk appended to
-the end of the file.
+### Standard download directory
+
+The download directory is a setting, stored in
+`$XDG_CONFIG_HOME/bbdx_file_gen/config.json` (usually `~/.config/...`). At every
+start the tool checks that a directory is configured and that it exists, is a
+directory and is writable. If not, it asks for one before anything else. The
+input is prefilled with a suggestion from your desktop settings (`user-dirs.dirs`),
+but nothing is saved until you confirm.
+
+- **Change it any time:** press `ctrl+d` on any wizard screen (you return to where
+  you were, inputs intact), or run `bbdx_file_gen -download-dir PATH`.
+- **Paths work like in bash:** absolute (`/data/dl`), relative to the current
+  directory (`dl`, `../dl`), `~`, `$VARS`/`${VARS}`, `"double"`/`'single'` quotes and
+  `\ ` escapes. `tab` completes directory names. Relative input is stored as an
+  absolute path, so the setting doesn't change meaning when you start the tool
+  somewhere else.
 
 ## Build & run
 
@@ -26,10 +33,11 @@ the end of the file.
 go build -o bbdx_file_gen .
 ./bbdx_file_gen          # interactive TUI
 ./bbdx_file_gen -list    # print all supported types with their minimum sizes
+./bbdx_file_gen -download-dir ~/Downloads   # set the standard download directory
 ```
 
 Keys: `enter` next · `esc` back · `tab` complete the type, or apply the suggested size ·
-`↑/↓` choose a type · `y`/`n` (or `←/→` + `enter`) answer the location question · `ctrl+c` quit. Existing files are only replaced after a
+`↑/↓` choose a type · `y`/`n` (or `←/→` + `enter`) answer the location question · `ctrl+d` change the download directory · `ctrl+c` quit. Existing files are only replaced after a
 `y/N` confirmation. Files are written to a temporary name and renamed into place,
 so an aborted run never leaves a partial file behind.
 
@@ -40,7 +48,7 @@ Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The 
 
 | Layer | Package | Responsibility |
 |---|---|---|
-| **Model** | `internal/model` | Domain logic with no UI code. `Format` (metadata, `SizeRule`, streaming writer), `Registry` (lookup by extension or alias, prefix search), `Service` (validation, atomic file creation), download-folder lookup, size parsing, and the 50 generators grouped by family in `formats_*.go`. |
+| **Model** | `internal/model` | Domain logic with no UI code. `Format` (metadata, `SizeRule`, streaming writer), `Registry` (lookup by extension or alias, prefix search), `Service` (validation, atomic file creation), configuration (download directory, bash-like path resolution and completion), size parsing, and the 50 generators grouped by family in `formats_*.go`. |
 | **View** | `internal/view` | `Render(State) string` and `RenderList`. Pure functions with no state and no model access. |
 | **Controller** | `internal/controller` | Implements Bubble Tea's `tea.Model`. Translates key presses into model calls, runs generation asynchronously with a spinner, and builds the `view.State`. |
 
@@ -108,6 +116,6 @@ go test -short ./...   # quick suite
   conversion, SQLite `integrity_check`, `python3 -m py_compile`, `cc -pedantic -Werror`,
   `node --check`, `sh -n`, `javac`, `php -l`.
 - **Controller tests** run complete wizard flows: minimum size, units,
-  unreachable sizes with the tab suggestion, aliases, both location answers, back navigation, overwrite
+  unreachable sizes with the tab suggestion, aliases, both location answers, first-run and unreachable download directory, `ctrl+d` from every screen, back navigation, overwrite
   confirmation, errors and quitting.
 - **View tests** check the rendered content and that every line fits in a 40-column terminal.

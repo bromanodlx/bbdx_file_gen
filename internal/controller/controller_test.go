@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,17 +17,46 @@ import (
 type harness struct {
 	t         *testing.T
 	c         *Controller
+	store     *memStore
 	dir       string // stands in for the current directory
-	downloads string // stands in for ~/Downloads (not created yet)
+	home      string
+	downloads string // the configured standard download directory
 	quit      bool
 }
 
+// memStore is an in-memory settings store.
+type memStore struct {
+	cfg     model.Config
+	loadErr error
+	saveErr error
+	saves   int
+}
+
+func (m *memStore) Load() (model.Config, error) { return m.cfg, m.loadErr }
+
+func (m *memStore) Save(c model.Config) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.cfg = c
+	m.saves++
+	return nil
+}
+
+// newHarness starts with a valid, configured download directory.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	dir := t.TempDir()
-	dl := filepath.Join(t.TempDir(), "Downloads")
-	c := New(&model.Service{Registry: model.Default()}, Locations{Current: dir, Downloads: dl})
-	h := &harness{t: t, c: c, dir: dir, downloads: dl}
+	dl := t.TempDir()
+	return newHarnessWith(t, &memStore{cfg: model.Config{DownloadDir: dl}})
+}
+
+func newHarnessWith(t *testing.T, store *memStore) *harness {
+	t.Helper()
+	dir, home := t.TempDir(), t.TempDir()
+	c := New(&model.Service{Registry: model.Default()}, Setup{
+		Current: dir, Home: home, Suggested: filepath.Join(home, "Downloads"), Store: store,
+	})
+	h := &harness{t: t, c: c, store: store, dir: dir, home: home, downloads: store.cfg.DownloadDir}
 	h.run(h.c.Init())
 	return h
 }
@@ -409,7 +439,7 @@ func TestYesCreatesInCurrentDirectory(t *testing.T) {
 	h.typ("y")
 	h.expectStep(view.StepDone)
 	fileSize(t, filepath.Join(h.dir, "here.txt"))
-	if _, err := os.Stat(h.downloads); err == nil {
+	if entries, _ := os.ReadDir(h.downloads); len(entries) != 0 {
 		t.Error("the download directory must not be touched")
 	}
 }
@@ -471,4 +501,197 @@ func TestAbsoluteNameSkipsLocationQuestion(t *testing.T) {
 	h.key(tea.KeyEnter)
 	h.expectStep(view.StepDone)
 	fileSize(t, abs+".txt")
+}
+
+// --- standard download directory ---
+
+func mkdir(t *testing.T, p string) string {
+	t.Helper()
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func (h *harness) setInput(v string) {
+	h.c.dlInput.SetValue(v)
+	h.c.dlInput.CursorEnd()
+}
+
+func TestFirstRunAsksForDownloadDir(t *testing.T) {
+	h := newHarnessWith(t, &memStore{})
+	h.expectStep(view.StepDownloadDir)
+	st := h.c.State()
+	if !strings.Contains(st.DownloadReason, "No standard download directory") {
+		t.Errorf("reason = %q", st.DownloadReason)
+	}
+	if h.c.dlInput.Value() != filepath.Join(h.home, "Downloads") {
+		t.Errorf("input must be prefilled with the suggestion, got %q", h.c.dlInput.Value())
+	}
+	mkdir(t, filepath.Join(h.home, "Downloads"))
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepName)
+	if h.store.cfg.DownloadDir != filepath.Join(h.home, "Downloads") || h.store.saves != 1 {
+		t.Errorf("stored %+v after %d saves", h.store.cfg, h.store.saves)
+	}
+}
+
+func TestSuggestionIsNeverUsedWithoutConfirmation(t *testing.T) {
+	h := newHarnessWith(t, &memStore{})
+	mkdir(t, filepath.Join(h.home, "Downloads"))
+	h.key(tea.KeyEsc) // first run: esc quits instead of silently using the suggestion
+	if !h.quit || h.store.saves != 0 {
+		t.Errorf("quit=%v saves=%d", h.quit, h.store.saves)
+	}
+}
+
+func TestUnreachableConfiguredDirAsksAgain(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "removed")
+	h := newHarnessWith(t, &memStore{cfg: model.Config{DownloadDir: gone}})
+	h.expectStep(view.StepDownloadDir)
+	if r := h.c.State().DownloadReason; !strings.Contains(r, gone) || !strings.Contains(r, "does not exist") {
+		t.Errorf("reason = %q", r)
+	}
+	if h.c.dlInput.Value() != gone {
+		t.Errorf("input should show the configured path, got %q", h.c.dlInput.Value())
+	}
+}
+
+func TestCorruptConfigAsksForDownloadDir(t *testing.T) {
+	h := newHarnessWith(t, &memStore{loadErr: errors.New("config is corrupt")})
+	h.expectStep(view.StepDownloadDir)
+	if !strings.Contains(h.c.State().DownloadReason, "corrupt") {
+		t.Errorf("reason = %q", h.c.State().DownloadReason)
+	}
+}
+
+func TestDownloadDirAcceptsRelativePath(t *testing.T) {
+	h := newHarnessWith(t, &memStore{})
+	mkdir(t, filepath.Join(h.dir, "out", "dl"))
+	h.setInput("out/./dl/")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepName)
+	if want := filepath.Join(h.dir, "out", "dl"); h.store.cfg.DownloadDir != want {
+		t.Errorf("stored %q, want absolute %q", h.store.cfg.DownloadDir, want)
+	}
+}
+
+func TestDownloadDirAcceptsTildeAndAbsolutePath(t *testing.T) {
+	h := newHarnessWith(t, &memStore{})
+	mkdir(t, filepath.Join(h.home, "Herunterladen"))
+	h.setInput("~/Herunterladen")
+	h.key(tea.KeyEnter)
+	if want := filepath.Join(h.home, "Herunterladen"); h.store.cfg.DownloadDir != want {
+		t.Errorf("stored %q, want %q", h.store.cfg.DownloadDir, want)
+	}
+
+	abs := t.TempDir()
+	h.key(tea.KeyCtrlD)
+	h.setInput(abs)
+	h.key(tea.KeyEnter)
+	if h.store.cfg.DownloadDir != abs {
+		t.Errorf("stored %q, want %q", h.store.cfg.DownloadDir, abs)
+	}
+}
+
+func TestInvalidDownloadDirIsRejected(t *testing.T) {
+	h := newHarnessWith(t, &memStore{})
+	h.setInput(filepath.Join(h.dir, "missing"))
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepDownloadDir)
+	if !strings.Contains(h.c.State().Error, "does not exist") || h.store.saves != 0 {
+		t.Errorf("error %q, saves %d", h.c.State().Error, h.store.saves)
+	}
+}
+
+func TestDownloadDirSaveFailureIsShown(t *testing.T) {
+	h := newHarnessWith(t, &memStore{saveErr: errors.New("disk full")})
+	mkdir(t, filepath.Join(h.home, "Downloads"))
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepDownloadDir)
+	if !strings.Contains(h.c.State().Error, "disk full") {
+		t.Errorf("error = %q", h.c.State().Error)
+	}
+}
+
+func TestCtrlDChangesDownloadDirAtAnyTime(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		goTo func(h *harness)
+		want view.Step
+	}{
+		{"name", func(h *harness) { h.typ("kept") }, view.StepName},
+		{"ext", func(h *harness) { h.typ("kept"); h.key(tea.KeyEnter); h.typ("pd") }, view.StepExt},
+		{"size", func(h *harness) { h.typ("kept"); h.key(tea.KeyEnter); h.typ("pdf"); h.key(tea.KeyEnter) }, view.StepSize},
+		{"location", func(h *harness) { h.toLocation("kept", "pdf") }, view.StepLocation},
+		{"done", func(h *harness) { h.toLocation("kept", "pdf"); h.typ("y") }, view.StepDone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			tc.goTo(h)
+			before := h.c.nameInput.Value() + "|" + h.c.extInput.Value()
+			h.key(tea.KeyCtrlD)
+			h.expectStep(view.StepDownloadDir)
+			if h.c.dlInput.Value() != h.downloads {
+				t.Errorf("input must show the current setting, got %q", h.c.dlInput.Value())
+			}
+			if !h.c.State().DownloadCancel {
+				t.Error("changing an existing setting must be cancellable")
+			}
+			newDir := t.TempDir()
+			h.setInput(newDir)
+			h.key(tea.KeyEnter)
+			h.expectStep(tc.want)
+			if after := h.c.nameInput.Value() + "|" + h.c.extInput.Value(); after != before {
+				t.Errorf("inputs changed from %q to %q", before, after)
+			}
+			if h.store.cfg.DownloadDir != newDir || h.c.State().DownloadDir != newDir {
+				t.Errorf("setting not applied: store %q, state %q", h.store.cfg.DownloadDir, h.c.State().DownloadDir)
+			}
+		})
+	}
+}
+
+func TestNewDownloadDirIsUsedForNo(t *testing.T) {
+	h := newHarness(t)
+	newDir := t.TempDir()
+	h.key(tea.KeyCtrlD)
+	h.setInput(newDir)
+	h.key(tea.KeyEnter)
+	h.toLocation("moved", "txt")
+	h.typ("n")
+	h.expectStep(view.StepDone)
+	fileSize(t, filepath.Join(newDir, "moved.txt"))
+}
+
+func TestEscCancelsDownloadDirChange(t *testing.T) {
+	h := newHarness(t)
+	h.typ("abc")
+	h.key(tea.KeyCtrlD)
+	h.setInput("/somewhere/else")
+	h.key(tea.KeyEsc)
+	h.expectStep(view.StepName)
+	if h.quit || h.store.cfg.DownloadDir != h.downloads || h.store.saves != 0 {
+		t.Errorf("cancel must keep the setting: quit=%v cfg=%q saves=%d", h.quit, h.store.cfg.DownloadDir, h.store.saves)
+	}
+}
+
+func TestTabCompletesDownloadDir(t *testing.T) {
+	h := newHarnessWith(t, &memStore{})
+	mkdir(t, filepath.Join(h.home, "Downloads"))
+	h.setInput("~/Dow")
+	h.key(tea.KeyTab)
+	if h.c.dlInput.Value() != "~/Downloads/" {
+		t.Errorf("completed to %q", h.c.dlInput.Value())
+	}
+}
+
+func TestCtrlDIgnoredWhileGeneratingOrConfirming(t *testing.T) {
+	h := newHarness(t)
+	os.WriteFile(filepath.Join(h.dir, "dup.txt"), nil, 0o644)
+	h.toLocation("dup", "txt")
+	h.typ("y")
+	h.expectStep(view.StepConfirm)
+	h.key(tea.KeyCtrlD)
+	h.expectStep(view.StepConfirm)
 }

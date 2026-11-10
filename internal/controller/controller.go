@@ -31,19 +31,33 @@ type (
 	spinnerTick struct{}
 )
 
-// Locations are the two directories the user chooses between.
-type Locations struct {
-	Current   string // the working directory ("Yes")
-	Downloads string // the standard download directory ("No")
+// Settings persists the user configuration (model.ConfigStore in production).
+type Settings interface {
+	Load() (model.Config, error)
+	Save(model.Config) error
+}
+
+// Setup is the environment the controller works in.
+type Setup struct {
+	Current   string // the working directory ("Yes" in the location question)
+	Home      string // expands ~ in paths
+	Suggested string // proposal shown when no download directory is configured
+	Store     Settings
 }
 
 // Controller holds the wizard state.
 type Controller struct {
-	svc *model.Service
-	loc Locations
+	svc   *model.Service
+	setup Setup
 
 	step                           view.Step
 	nameInput, extInput, sizeInput textinput.Model
+	dlInput                        textinput.Model
+
+	downloads string    // the configured, verified standard download directory
+	dlReturn  view.Step // step to return to after the download directory screen
+	dlCancel  bool      // the download directory screen can be left with esc
+	dlReason  string
 
 	matches []model.Format
 	sel     int
@@ -52,7 +66,6 @@ type Controller struct {
 	format  model.Format
 	target  string // final path once the location is known, else the bare file name
 	dir     string // chosen base directory
-	makeDir bool   // create dir if missing (the download directory)
 	locYes  bool   // "Yes" highlighted in the location question
 	size    int64
 	suggest int64 // nearest valid size offered after a SizeError, -1 if none
@@ -63,19 +76,76 @@ type Controller struct {
 	height  int
 }
 
-// New creates a controller that generates files through svc into one of loc.
-func New(svc *model.Service, loc Locations) *Controller {
+// New creates a controller that generates files through svc. If no reachable
+// standard download directory is configured, it starts by asking for one.
+func New(svc *model.Service, setup Setup) *Controller {
 	c := &Controller{
 		svc:       svc,
-		loc:       loc,
+		setup:     setup,
 		nameInput: newInput("report"),
 		extInput:  newInput("pdf, png, docx, …"),
 		sizeInput: newInput(""),
+		dlInput:   newInput("~/Downloads"),
 		suggest:   -1,
 	}
-	c.nameInput.Focus()
 	c.refreshMatches()
+	c.goTo(view.StepName)
+	cfg, err := setup.Store.Load()
+	switch {
+	case err != nil:
+		c.askDownloadDir(fmt.Sprintf("The configuration could not be read:\n  %v", err), setup.Suggested)
+	case cfg.DownloadDir == "":
+		c.askDownloadDir("No standard download directory is configured yet.", setup.Suggested)
+	default:
+		if err := model.CheckDir(cfg.DownloadDir); err != nil {
+			c.askDownloadDir(fmt.Sprintf("The configured download directory is not reachable:\n  %v", err), cfg.DownloadDir)
+		} else {
+			c.downloads = cfg.DownloadDir
+		}
+	}
 	return c
+}
+
+// askDownloadDir shows the mandatory download directory screen.
+func (c *Controller) askDownloadDir(reason, prefill string) {
+	c.dlReason, c.dlCancel, c.dlReturn = reason, false, view.StepName
+	c.dlInput.SetValue(prefill)
+	c.dlInput.CursorEnd()
+	c.goTo(view.StepDownloadDir)
+}
+
+// changeDownloadDir opens the download directory screen from the current step.
+func (c *Controller) changeDownloadDir() {
+	c.dlReason, c.dlCancel, c.dlReturn = "", true, c.step
+	c.dlInput.SetValue(c.downloads)
+	c.dlInput.CursorEnd()
+	c.goTo(view.StepDownloadDir)
+}
+
+func (c *Controller) updateDownloadDir(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		if !c.dlCancel {
+			return c, tea.Quit
+		}
+		c.goTo(c.dlReturn)
+		return c, nil
+	case tea.KeyTab:
+		c.dlInput.SetValue(model.CompleteDir(c.dlInput.Value(), c.setup.Current, c.setup.Home))
+		c.dlInput.CursorEnd()
+		c.clearMessages()
+		return c, nil
+	case tea.KeyEnter:
+		dir, err := model.SetDownloadDir(c.setup.Store, c.dlInput.Value(), c.setup.Current, c.setup.Home)
+		if err != nil {
+			c.errMsg = err.Error()
+			return c, nil
+		}
+		c.downloads = dir
+		c.goTo(c.dlReturn)
+		return c, nil
+	}
+	return c, c.edit(&c.dlInput, msg)
 }
 
 func newInput(placeholder string) textinput.Model {
@@ -115,7 +185,16 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyCtrlC {
 			return c, tea.Quit
 		}
+		if msg.Type == tea.KeyCtrlD {
+			switch c.step {
+			case view.StepName, view.StepExt, view.StepSize, view.StepLocation, view.StepDone:
+				c.changeDownloadDir()
+			}
+			return c, nil
+		}
 		switch c.step {
+		case view.StepDownloadDir:
+			return c.updateDownloadDir(msg)
 		case view.StepName:
 			return c.updateName(msg)
 		case view.StepExt:
@@ -234,7 +313,7 @@ func (c *Controller) updateSize(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		c.size = size
 		if c.absoluteName() {
-			c.dir, c.makeDir = "", false
+			c.dir = ""
 			return c, c.confirmOrGenerate()
 		}
 		c.target = model.FileName(c.nameInput.Value(), c.format.Ext)
@@ -266,9 +345,9 @@ func (c *Controller) updateLocation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // chooseLocation answers "create in the current directory?".
 func (c *Controller) chooseLocation(yes bool) tea.Cmd {
 	c.locYes = yes
-	c.dir, c.makeDir = c.loc.Current, false
+	c.dir = c.setup.Current
 	if !yes {
-		c.dir, c.makeDir = c.loc.Downloads, true
+		c.dir = c.downloads
 	}
 	return c.confirmOrGenerate()
 }
@@ -323,7 +402,7 @@ func (c *Controller) generate(overwrite bool) tea.Cmd {
 	c.goTo(view.StepGenerating)
 	size := c.size
 	req := model.Request{
-		Dir: c.dir, MakeDir: c.makeDir,
+		Dir:  c.dir,
 		Name: c.nameInput.Value(), Ext: c.format.Ext, Size: &size, Overwrite: overwrite,
 	}
 	svc := c.svc
@@ -356,7 +435,7 @@ func (c *Controller) clearMessages() {
 func (c *Controller) goTo(step view.Step) {
 	c.step = step
 	c.clearMessages()
-	for _, in := range []*textinput.Model{&c.nameInput, &c.extInput, &c.sizeInput} {
+	for _, in := range []*textinput.Model{&c.nameInput, &c.extInput, &c.sizeInput, &c.dlInput} {
 		in.Blur()
 	}
 	switch step {
@@ -366,6 +445,8 @@ func (c *Controller) goTo(step view.Step) {
 		c.extInput.Focus()
 	case view.StepSize:
 		c.sizeInput.Focus()
+	case view.StepDownloadDir:
+		c.dlInput.Focus()
 	}
 }
 
@@ -399,7 +480,8 @@ func (c *Controller) State() view.State {
 		Name: strings.TrimSpace(c.nameInput.Value()), Error: c.errMsg,
 		Ext: c.format.Ext, FormatName: c.format.Name, TargetPath: c.target,
 		Spinner:    spinnerFrames[c.frame%len(spinnerFrames)],
-		CurrentDir: c.loc.Current, DownloadDir: c.loc.Downloads, LocationYes: c.locYes,
+		CurrentDir: c.setup.Current, DownloadDir: c.downloads, LocationYes: c.locYes,
+		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note
@@ -423,6 +505,8 @@ func (c *Controller) State() view.State {
 		s.MoreSuggestions = len(c.matches) - (end - c.offset)
 	case view.StepSize:
 		s.Input = c.sizeInput.View()
+	case view.StepDownloadDir:
+		s.Input = c.dlInput.View()
 	case view.StepGenerating:
 		s.SizeLabel = model.HumanSize(c.size)
 	case view.StepDone:

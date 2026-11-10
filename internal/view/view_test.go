@@ -151,3 +151,33 @@ func TestRenderLocationQuestion(t *testing.T) {
 		t.Errorf("location help must mention y/n:\n%s", out)
 	}
 }
+
+func TestRenderDownloadDirSetup(t *testing.T) {
+	s := State{Step: StepDownloadDir, Input: "> ~/Downloads", DownloadReason: "No standard download directory is configured yet."}
+	out := render(s)
+	for _, want := range []string{"Standard download directory", "No standard download directory", "> ~/Downloads", "relative", "absolute", "~", "esc quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "1 Name") {
+		t.Errorf("the settings screen is not part of the wizard steps:\n%s", out)
+	}
+	s.DownloadCancel = true
+	if out := render(s); !strings.Contains(out, "esc cancel") {
+		t.Errorf("an existing setting must be cancellable:\n%s", out)
+	}
+}
+
+func TestHelpAdvertisesDownloadDirShortcut(t *testing.T) {
+	for _, step := range []Step{StepName, StepExt, StepSize, StepLocation, StepDone} {
+		if out := render(State{Step: step}); !strings.Contains(out, "ctrl+d download dir") {
+			t.Errorf("step %v help lacks ctrl+d:\n%s", step, out)
+		}
+	}
+	for _, step := range []Step{StepConfirm, StepGenerating} {
+		if out := render(State{Step: step}); strings.Contains(out, "ctrl+d") {
+			t.Errorf("step %v must not offer ctrl+d", step)
+		}
+	}
+}
