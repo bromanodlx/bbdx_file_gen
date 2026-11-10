@@ -695,3 +695,75 @@ func TestCtrlDIgnoredWhileGeneratingOrConfirming(t *testing.T) {
 	h.key(tea.KeyCtrlD)
 	h.expectStep(view.StepConfirm)
 }
+
+// --- EICAR test files ---
+
+func TestEICARNameSkipsSizeStepAndWritesTheString(t *testing.T) {
+	h := newHarness(t)
+	h.typ("eicar")
+	h.key(tea.KeyEnter)
+	h.typ("txt")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepLocation) // the size step is skipped
+	h.typ("y")
+	h.expectStep(view.StepDone)
+	data, err := os.ReadFile(filepath.Join(h.dir, "eicar.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != model.EICAR {
+		t.Errorf("content = %q", data)
+	}
+	if st := h.c.State(); st.Bytes != 68 {
+		t.Errorf("done screen size = %d, want 68", st.Bytes)
+	}
+}
+
+func TestEICARNameIsCaseInsensitive(t *testing.T) {
+	h := newHarness(t)
+	h.typ("EiCaR")
+	h.key(tea.KeyEnter)
+	h.typ("txt")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepLocation)
+	if !h.c.State().EICAR {
+		t.Error("state must mark the EICAR mode")
+	}
+}
+
+func TestEICAREscFromLocationReturnsToType(t *testing.T) {
+	h := newHarness(t)
+	h.typ("eicar")
+	h.key(tea.KeyEnter)
+	h.typ("txt")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepLocation)
+	h.key(tea.KeyEsc) // no size step to go back to
+	h.expectStep(view.StepExt)
+}
+
+func TestEICARAbsoluteNameSkipsSizeAndLocation(t *testing.T) {
+	h := newHarness(t)
+	abs := filepath.Join(t.TempDir(), "eicar")
+	h.typ(abs)
+	h.key(tea.KeyEnter)
+	h.typ("txt")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepDone)
+	data, err := os.ReadFile(abs + ".txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != model.EICAR {
+		t.Errorf("content = %q", data)
+	}
+}
+
+func TestNonEICARNameStillAsksForSize(t *testing.T) {
+	h := newHarness(t)
+	h.typ("report")
+	h.key(tea.KeyEnter)
+	h.typ("txt")
+	h.key(tea.KeyEnter)
+	h.expectStep(view.StepSize)
+}

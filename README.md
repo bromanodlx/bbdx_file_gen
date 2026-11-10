@@ -10,6 +10,16 @@ It asks four questions:
    current directory, **No** puts it in your standard download directory. Absolute
    names such as `/tmp/x` skip this question.
 
+### EICAR test files
+
+Name the file **eicar** (any capitalization, with or without an extension) and
+the tool writes the [EICAR anti-malware test file](https://www.eicar.org/download-anti-malware-testfile/)
+instead of ordinary content: the standard 68-byte printable-ASCII string, which
+scanners detect without any real malware being involved. The chosen file type
+only sets the extension (`eicar.txt`, `eicar.zip`, `eicar.com`, …); the content
+and size are always the same. The size question is skipped, since 68 bytes is the
+smallest — and only — size such a file has.
+
 ### Standard download directory
 
 The download directory is a setting, stored in

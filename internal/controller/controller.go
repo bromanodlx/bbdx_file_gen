@@ -66,6 +66,7 @@ type Controller struct {
 	format  model.Format
 	target  string // final path once the location is known, else the bare file name
 	dir     string // chosen base directory
+	eicar   bool   // the current file is an EICAR test file (fixed 68 bytes)
 	locYes  bool   // "Yes" highlighted in the location question
 	size    int64
 	suggest int64 // nearest valid size offered after a SizeError, -1 if none
@@ -269,6 +270,11 @@ func (c *Controller) updateExt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		c.format, c.target = f, target
 		c.extInput.SetValue(f.Ext)
 		c.refreshMatches()
+		// An "eicar" name has a fixed 68-byte content, so there is no size to ask.
+		if c.eicar = model.IsEICARName(c.nameInput.Value()); c.eicar {
+			c.size = int64(len(model.EICAR))
+			return c, c.proceedToLocation()
+		}
 		c.sizeInput.Placeholder = fmt.Sprintf("%d (minimum)", f.Rule.Min)
 		c.goTo(view.StepSize)
 		return c, nil
@@ -312,22 +318,28 @@ func (c *Controller) updateSize(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return c, nil
 		}
 		c.size = size
-		if c.absoluteName() {
-			c.dir = ""
-			return c, c.confirmOrGenerate()
-		}
-		c.target = model.FileName(c.nameInput.Value(), c.format.Ext)
-		c.locYes = true
-		c.goTo(view.StepLocation)
-		return c, nil
+		return c, c.proceedToLocation()
 	}
 	return c, c.edit(&c.sizeInput, msg)
+}
+
+// proceedToLocation moves to the location question once the size is known, or
+// generates straight away when the name is an absolute path.
+func (c *Controller) proceedToLocation() tea.Cmd {
+	if c.absoluteName() {
+		c.dir = ""
+		return c.confirmOrGenerate()
+	}
+	c.target = model.FileName(c.nameInput.Value(), c.format.Ext)
+	c.locYes = true
+	c.goTo(view.StepLocation)
+	return nil
 }
 
 func (c *Controller) updateLocation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyEsc:
-		c.goTo(view.StepSize)
+		c.goTo(c.backFromLocation())
 	case msg.Type == tea.KeyLeft || msg.Type == tea.KeyUp:
 		c.locYes = true
 	case msg.Type == tea.KeyRight || msg.Type == tea.KeyDown || msg.Type == tea.KeyTab:
@@ -370,10 +382,19 @@ func (c *Controller) absoluteName() bool {
 	return filepath.IsAbs(strings.TrimSpace(c.nameInput.Value()))
 }
 
+// backFromLocation is the step the location question returns to; an EICAR file
+// has no size step in between.
+func (c *Controller) backFromLocation() view.Step {
+	if c.eicar {
+		return view.StepExt
+	}
+	return view.StepSize
+}
+
 // backFromGenerate is the step to return to when generation is declined or fails.
 func (c *Controller) backFromGenerate() view.Step {
 	if c.absoluteName() {
-		return view.StepSize
+		return c.backFromLocation()
 	}
 	return view.StepLocation
 }
@@ -454,6 +475,7 @@ func (c *Controller) reset() {
 	c.nameInput.Reset()
 	c.extInput.Reset()
 	c.sizeInput.Reset()
+	c.eicar = false
 	c.refreshMatches()
 	c.goTo(view.StepName)
 }
@@ -481,7 +503,7 @@ func (c *Controller) State() view.State {
 		Ext: c.format.Ext, FormatName: c.format.Name, TargetPath: c.target,
 		Spinner:    spinnerFrames[c.frame%len(spinnerFrames)],
 		CurrentDir: c.setup.Current, DownloadDir: c.downloads, LocationYes: c.locYes,
-		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel,
+		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note

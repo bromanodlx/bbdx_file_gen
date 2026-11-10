@@ -58,6 +58,8 @@ type State struct {
 	DownloadReason string // why the download directory is being asked for
 	DownloadCancel bool   // esc returns instead of quitting
 
+	EICAR bool // the file is an EICAR anti-malware test file
+
 	SizeLabel string // human readable size of the file being/just generated
 	Bytes     int64
 	Spinner   string
@@ -79,6 +81,7 @@ var (
 	errorSt   = lipgloss.NewStyle().Foreground(bad)
 	successSt = lipgloss.NewStyle().Bold(true).Foreground(good)
 	selectSt  = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	eicarSt   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#b45309", Dark: "#e0af68"})
 )
 
 // Render draws the whole screen.
@@ -118,6 +121,9 @@ func Render(s State) string {
 		}
 	case StepLocation:
 		b.WriteString(labelSt.Render("Location") + mutedSt.Render("  for "+s.TargetPath) + "\n")
+		if s.EICAR {
+			b.WriteString(eicarSt.Render("EICAR anti-malware test file — 68 bytes, the smallest possible.") + "\n")
+		}
 		b.WriteString("Create the file in the current directory?\n")
 		b.WriteString(choice(s.LocationYes, "Yes", s.CurrentDir) + "\n")
 		b.WriteString(choice(!s.LocationYes, "No ", s.DownloadDir+"  (download folder)") + "\n")
@@ -128,6 +134,9 @@ func Render(s State) string {
 	case StepDone:
 		b.WriteString(successSt.Render("✓ Created "+s.TargetPath) + "\n")
 		b.WriteString(fmt.Sprintf("  %s · %s (%d bytes)\n", s.FormatName, s.SizeLabel, s.Bytes))
+		if s.EICAR {
+			b.WriteString(eicarSt.Render("  EICAR anti-malware test file — scanners will flag it; this is expected.") + "\n")
+		}
 	}
 
 	if s.Error != "" {

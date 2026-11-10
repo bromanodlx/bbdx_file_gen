@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,8 @@ type Result struct {
 	Path   string
 	Size   int64
 	Format Format
+	// EICAR is true when the file was filled with the EICAR test string.
+	EICAR bool
 }
 
 // Service creates files on disk.
@@ -87,13 +90,22 @@ func (s *Service) Create(req Request) (Result, error) {
 		return Result{}, err
 	}
 	f, _ := s.Registry.Lookup(req.Ext)
+
+	// An "eicar" name produces the EICAR test string at its natural 68 bytes,
+	// regardless of the format's size rule or any requested size.
+	eicar := IsEICARName(req.Name)
 	size := f.Rule.Min
-	if req.Size != nil {
+	switch {
+	case eicar:
+		size = int64(len(EICAR))
+	case req.Size != nil:
 		size = *req.Size
 	}
-	if err := f.Rule.Check(size); err != nil {
-		err.(*SizeError).Ext = f.Ext
-		return Result{}, err
+	if !eicar {
+		if err := f.Rule.Check(size); err != nil {
+			err.(*SizeError).Ext = f.Ext
+			return Result{}, err
+		}
 	}
 	if _, err := os.Stat(path); err == nil && !req.Overwrite {
 		return Result{}, fmt.Errorf("%w: %s", ErrExists, path)
@@ -107,7 +119,11 @@ func (s *Service) Create(req Request) (Result, error) {
 		return Result{}, err
 	}
 	defer os.Remove(tmp.Name()) // no-op after a successful rename
-	if err := f.Generate(tmp, size); err != nil {
+	write := func(w io.Writer) error { return f.Generate(w, size) }
+	if eicar {
+		write = func(w io.Writer) error { _, err := io.WriteString(w, EICAR); return err }
+	}
+	if err := write(tmp); err != nil {
 		tmp.Close()
 		return Result{}, err
 	}
@@ -120,5 +136,5 @@ func (s *Service) Create(req Request) (Result, error) {
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return Result{}, err
 	}
-	return Result{Path: path, Size: size, Format: f}, nil
+	return Result{Path: path, Size: size, Format: f, EICAR: eicar}, nil
 }

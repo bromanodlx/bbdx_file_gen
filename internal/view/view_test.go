@@ -181,3 +181,17 @@ func TestHelpAdvertisesDownloadDirShortcut(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderEICARNote(t *testing.T) {
+	loc := render(State{Step: StepLocation, EICAR: true, TargetPath: "eicar.txt", CurrentDir: "/a", DownloadDir: "/b"})
+	if !strings.Contains(loc, "EICAR") || !strings.Contains(loc, "68") {
+		t.Errorf("location step must note the EICAR file and its size:\n%s", loc)
+	}
+	done := render(State{Step: StepDone, EICAR: true, TargetPath: "eicar.txt", SizeLabel: "68 B", Bytes: 68, FormatName: "Plain text"})
+	if !strings.Contains(done, "EICAR") {
+		t.Errorf("done step must note the EICAR file:\n%s", done)
+	}
+	if plain := render(State{Step: StepLocation, TargetPath: "x.txt", CurrentDir: "/a", DownloadDir: "/b"}); strings.Contains(plain, "EICAR") {
+		t.Errorf("an ordinary file must not mention EICAR:\n%s", plain)
+	}
+}
