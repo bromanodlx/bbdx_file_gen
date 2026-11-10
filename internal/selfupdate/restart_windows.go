@@ -1,6 +1,6 @@
 //go:build windows
 
-package cli
+package selfupdate
 
 import (
 	"errors"
@@ -8,10 +8,10 @@ import (
 	"os/exec"
 )
 
-// restartProcess runs exe with this process's arguments and terminal, waits
+// Restart runs exe with this process's arguments and terminal, waits
 // for it and returns its exit code. Windows has no exec, so the old process
 // stays around, idle, until the new one ends.
-func restartProcess(exe string) (int, error) {
+func Restart(exe string) (int, error) {
 	cmd := exec.Command(exe, os.Args[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Run()

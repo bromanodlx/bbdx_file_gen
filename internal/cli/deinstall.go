@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/bromanodlx/bbdx_file_gen/internal/model"
+	"github.com/bromanodlx/bbdx_file_gen/internal/selfupdate"
 )
 
 // deinstallCmd is the subcommand that removes the tool from the system.
@@ -67,21 +68,32 @@ func deinstallTargets(cfgPath string) ([]string, error) {
 	if dir := filepath.Dir(cfgPath); model.Exists(dir) {
 		targets = append(targets, dir)
 	}
-	exe, err := executable()
+	exe, err := installedExecutable()
 	if err != nil {
-		return nil, fmt.Errorf("cannot locate the %s executable: %w", name, err)
-	}
-	if real, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = real
+		return nil, err
 	}
 	if link := invokedLink(exe); link != "" {
 		targets = append(targets, link)
 	}
 	// An update on Windows leaves the replaced executable behind as exe.old.
-	if old := exe + ".old"; model.Exists(old) {
+	if old := selfupdate.BackupPath(exe); model.Exists(old) {
 		targets = append(targets, old)
 	}
 	return append(targets, exe), nil
+}
+
+// installedExecutable returns the path of the running program's executable
+// with symlinks resolved: the file to replace on update or remove on
+// deinstall.
+func installedExecutable() (string, error) {
+	exe, err := executable()
+	if err != nil {
+		return "", fmt.Errorf("cannot locate the %s executable: %w", name, err)
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	return exe, nil
 }
 
 // invokedLink returns the absolute path the program was started under when

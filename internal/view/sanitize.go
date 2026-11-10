@@ -7,8 +7,9 @@ import (
 )
 
 // sanitize makes text from outside the program (file and directory names,
-// the configuration file, error messages) safe to print: every control
-// character, including ESC, CR and the C1 controls such as CSI, and every
+// the configuration file, error messages, release versions) safe to print:
+// every control character, including ESC, CR and the C1 controls such as CSI,
+// and every
 // byte that is not valid UTF-8 (a raw 0x9B is CSI on 8-bit terminals) is
 // replaced by "?", so the text can neither inject terminal escape sequences
 // (retitle the window, clear or overwrite the screen) nor break the layout.
@@ -40,6 +41,7 @@ func (s State) sanitized() State {
 	for _, f := range []*string{
 		&s.Name, &s.Ext, &s.FormatName, &s.TargetPath, &s.MinSize, &s.SizeNote,
 		&s.CurrentDir, &s.DownloadDir, &s.SizeLabel, &s.Spinner, &s.Error, &s.Hint,
+		&s.UpdateVersion, &s.InstalledVersion,
 	} {
 		*f = sanitize(*f)
 	}

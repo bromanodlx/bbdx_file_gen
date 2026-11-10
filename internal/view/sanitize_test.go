@@ -3,6 +3,8 @@ package view
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSanitize(t *testing.T) {
@@ -70,5 +72,19 @@ func TestPadTruncatesAndPads(t *testing.T) {
 		if got := pad(tc.left, tc.right, tc.w, "..."); got != tc.want {
 			t.Errorf("pad(%q, %q, %d) = %q, want %q", tc.left, tc.right, tc.w, got, tc.want)
 		}
+	}
+}
+
+// Regression: the update question shows versions that come from the network;
+// they must be sanitized like every other text field.
+func TestUpdateVersionsAreSanitized(t *testing.T) {
+	out := Render(State{Step: StepUpdate, UpdateVersion: "9.9.9\x1b]0;pwned\x07", InstalledVersion: "1.4.1\x1b[2J\x9b"})
+	for _, bad := range []string{"\x1b]0;", "\x07", "\x1b[2J", "\x9b"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("rendered update question contains %q", bad)
+		}
+	}
+	if plain := ansi.Strip(out); !strings.Contains(plain, "9.9.9?]0;pwned?") || !strings.Contains(plain, "1.4.1?[2J?") {
+		t.Errorf("versions not shown sanitized:\n%s", plain)
 	}
 }

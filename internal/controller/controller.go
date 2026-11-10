@@ -65,6 +65,15 @@ type Setup struct {
 	Now func() time.Time
 }
 
+// updateOffer is the state of the update question.
+type updateOffer struct {
+	version  string    // newer version offered; set once the question pops up
+	pending  string    // newer version found while busy, offered later
+	ret      view.Step // step the question pops up over and returns to
+	shown    time.Time // when the question popped up
+	accepted string    // version the user chose to install
+}
+
 // Controller holds the wizard state.
 type Controller struct {
 	svc   *model.Service
@@ -81,11 +90,7 @@ type Controller struct {
 	dlCancel  bool      // the download directory screen can be left with esc
 	dlReason  string
 
-	updateVersion  string    // newer version being offered
-	updatePending  string    // newer version found while busy, offered later
-	updateReturn   view.Step // step to return to when the update is declined
-	updateShown    time.Time // when the update question appeared
-	updateAccepted string    // version the user chose to install
+	update updateOffer
 
 	matches []model.Format
 	sel     int
@@ -241,7 +246,7 @@ func (c *Controller) Init() tea.Cmd {
 
 // UpdateRequested returns the version the user chose to install from the
 // update question, or "" if none. The wizard has quit when it is set.
-func (c *Controller) UpdateRequested() string { return c.updateAccepted }
+func (c *Controller) UpdateRequested() string { return c.update.accepted }
 
 func (c *Controller) now() time.Time {
 	if c.setup.Now != nil {
@@ -251,34 +256,30 @@ func (c *Controller) now() time.Time {
 }
 
 // offerUpdate pops up the update question over the current step, or keeps
-// it for later while a file is being generated.
+// it for later while a file is being generated. It is asked at most once.
 func (c *Controller) offerUpdate(version string) {
-	if version == "" || c.updateVersion != "" {
+	if version == "" || c.update.version != "" {
 		return
 	}
 	if c.step == view.StepGenerating {
-		c.updatePending = version
+		c.update.pending = version
 		return
 	}
-	c.updatePending = ""
-	c.updateVersion, c.updateReturn, c.updateShown = version, c.step, c.now()
-	errMsg, suggest := c.errMsg, c.suggest
-	c.goTo(view.StepUpdate)
-	c.errMsg, c.suggest = errMsg, suggest // restored when returning
+	c.update = updateOffer{version: version, ret: c.step, shown: c.now()}
+	c.switchTo(view.StepUpdate) // keeps the step's messages for the return
 }
 
-func (c *Controller) updateUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if c.now().Sub(c.updateShown) < updateGrace {
+// answerUpdate handles keys on the update question.
+func (c *Controller) answerUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if c.now().Sub(c.update.shown) < updateGrace {
 		return c, nil
 	}
 	switch {
 	case isKey(msg, "y"):
-		c.updateAccepted = c.updateVersion
+		c.update.accepted = c.update.version
 		return c, tea.Quit
 	case msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || isKey(msg, "n"):
-		errMsg, suggest := c.errMsg, c.suggest
-		c.goTo(c.updateReturn)
-		c.errMsg, c.suggest = errMsg, suggest
+		c.switchTo(c.update.ret)
 	}
 	return c, nil
 }
@@ -307,7 +308,7 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c.result = msg.res
 			c.step = view.StepDone
 		}
-		c.offerUpdate(c.updatePending)
+		c.offerUpdate(c.update.pending)
 		return c, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -335,7 +336,7 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case view.StepDone:
 			return c.updateDone(msg)
 		case view.StepUpdate:
-			return c.updateUpdate(msg)
+			return c.answerUpdate(msg)
 		}
 	}
 	return c, nil
@@ -592,9 +593,17 @@ func (c *Controller) input(step view.Step) *textinput.Model {
 	return nil
 }
 
+// goTo moves to step with fresh messages.
 func (c *Controller) goTo(step view.Step) {
-	c.step = step
 	c.clearMessages()
+	c.switchTo(step)
+}
+
+// switchTo shows step and focuses its input, keeping the current error and
+// hint; used for the update question, which pops up over a step and returns
+// to it unchanged.
+func (c *Controller) switchTo(step view.Step) {
+	c.step = step
 	for _, in := range []*textinput.Model{&c.nameInput, &c.extInput, &c.sizeInput, &c.dlInput} {
 		in.Blur()
 	}
@@ -636,7 +645,7 @@ func (c *Controller) State() view.State {
 		Spinner:    c.spinner[c.frame%len(c.spinner)],
 		CurrentDir: c.setup.Current, DownloadDir: c.downloads, LocationYes: c.locYes,
 		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar, Plain: c.setup.Plain,
-		UpdateVersion: c.updateVersion, InstalledVersion: c.setup.Version,
+		UpdateVersion: c.update.version, InstalledVersion: c.setup.Version,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note

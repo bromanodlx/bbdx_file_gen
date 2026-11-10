@@ -41,6 +41,8 @@ var goldenStates = []struct {
 		DownloadDir: "/dl\x9b31m", Error: "bad\x1b[31m red"}},
 	{"c1-and-reason", State{Step: StepDownloadDir, Input: "> x",
 		DownloadReason: "first\u009b2J line\n  second \x1b]8;;http://x\x07link"}},
+	{"update", State{Step: StepUpdate, UpdateVersion: "1.5.0", InstalledVersion: "1.4.1"}},
+	{"update-control-chars", State{Step: StepUpdate, UpdateVersion: "9.9.9\x1b]0;pwned\x07", InstalledVersion: "1.4.1\x1b[2J"}},
 }
 
 func renderGolden() string {

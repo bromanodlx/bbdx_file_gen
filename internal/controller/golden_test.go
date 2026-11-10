@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -18,17 +19,27 @@ var update = flag.Bool("update", false, "rewrite golden files instead of compari
 
 const goldenTranscriptPath = "testdata/golden_transcript.txt"
 
-// event is one scripted input: typed text or a special key.
+// event is one scripted input: typed text, a special key, the background
+// update check answering, or the update question's grace period passing.
 type event struct {
-	text string
-	key  tea.KeyType
+	text   string
+	key    tea.KeyType
+	update *string
+	wait   bool
 }
 
-func txt(s string) event      { return event{text: s} }
-func k(key tea.KeyType) event { return event{key: key} }
+func txt(s string) event       { return event{text: s} }
+func k(key tea.KeyType) event  { return event{key: key} }
+func upd(version string) event { return event{update: &version} }
+func wait() event              { return event{wait: true} }
 func (e event) String() string {
-	if e.text != "" {
+	switch {
+	case e.text != "":
 		return fmt.Sprintf("type %q", e.text)
+	case e.update != nil:
+		return fmt.Sprintf("update check answers %q", *e.update)
+	case e.wait:
+		return "grace period passes"
 	}
 	return "key " + tea.KeyMsg{Type: e.key}.String()
 }
@@ -53,6 +64,18 @@ var goldenFlows = []struct {
 	{"absolute-eicar", []event{txt("@ABS@/eicar"), k(tea.KeyEnter), txt("zip"), k(tea.KeyEnter)}},
 	{"ctrl-d", []event{txt("a"), k(tea.KeyCtrlD), k(tea.KeyEsc), k(tea.KeyEnter), k(tea.KeyCtrlD), k(tea.KeyCtrlU), txt("su"), k(tea.KeyTab), k(tea.KeyEnter), txt("txt"), k(tea.KeyEnter), k(tea.KeyEnter), txt("n"), k(tea.KeyCtrlD), k(tea.KeyCtrlU), txt("/nonexistent/dir"), k(tea.KeyEnter), k(tea.KeyEsc)}},
 	{"generation-error", []event{txt("missing/sub/file"), k(tea.KeyEnter), txt("txt"), k(tea.KeyEnter), k(tea.KeyEnter), txt("y"), k(tea.KeyCtrlC)}},
+	// The update question: it pops up over any step, ignores keys during the
+	// grace period, returns to the step unchanged on no, quits on yes and is
+	// asked once per start.
+	{"update-none", []event{txt("a"), upd(""), txt("b")}},
+	{"update-decline-keeps-inputs", []event{txt("report"), k(tea.KeyEnter), txt("pd"), upd("1.5.0"), wait(), txt("n"), txt("f"), k(tea.KeyEnter), upd("1.6.0"), k(tea.KeyEnter)}},
+	{"update-early-keys-ignored", []event{txt("ma"), upd("1.5.0"), txt("y"), txt("n"), k(tea.KeyEnter), k(tea.KeyEsc), wait(), k(tea.KeyEsc), txt("p")}},
+	{"update-accept", []event{txt("x"), k(tea.KeyEnter), upd("1.5.0"), wait(), txt("Y")}},
+	{"update-keeps-error-and-hint", []event{txt("t"), k(tea.KeyEnter), txt("tar"), k(tea.KeyEnter), txt("1500"), k(tea.KeyEnter), upd("1.5.0"), wait(), k(tea.KeyTab), txt("x"), k(tea.KeyEnter), k(tea.KeyTab)}},
+	{"update-over-location", []event{txt("loc"), k(tea.KeyEnter), txt("txt"), k(tea.KeyEnter), k(tea.KeyEnter), k(tea.KeyRight), upd("1.5.0"), wait(), k(tea.KeyEsc), k(tea.KeyEnter)}},
+	{"update-over-confirm", []event{txt("dup"), k(tea.KeyEnter), txt("txt"), k(tea.KeyEnter), k(tea.KeyEnter), txt("y"), k(tea.KeyEnter), txt("dup"), k(tea.KeyEnter), txt("txt"), k(tea.KeyEnter), k(tea.KeyEnter), txt("y"), upd("1.5.0"), wait(), txt("n"), txt("y")}},
+	{"update-over-done", []event{txt("d"), k(tea.KeyEnter), txt("txt"), k(tea.KeyEnter), k(tea.KeyEnter), txt("y"), upd("2.0.0"), wait(), txt("q"), txt("n"), txt("q")}},
+	{"update-ctrl-d-ignored-ctrl-c-quits", []event{upd("1.5.0"), wait(), k(tea.KeyCtrlD), k(tea.KeyCtrlC)}},
 }
 
 func repeatKey(key tea.KeyType, n int) []event {
@@ -72,6 +95,8 @@ func runTranscript(t *testing.T, events []event) string {
 		mkdir(t, filepath.Join(root, "dl")), mkdir(t, filepath.Join(root, "abs"))
 	mkdir(t, filepath.Join(dir, "sub"))
 	h := newHarnessAt(t, &memStore{cfg: model.Config{DownloadDir: dl}}, dir, home)
+	clk := &clock{t: time.Unix(1_000_000, 0)}
+	h.c.setup.Now, h.c.setup.Version = clk.now, "1.4.1"
 	clean := strings.NewReplacer(abs, "@ABS@", dir, "@CWD@", home, "@HOME@", dl, "@DL@", root, "@ROOT@").Replace
 
 	var b strings.Builder
@@ -81,9 +106,14 @@ func runTranscript(t *testing.T, events []event) string {
 	}
 	record("start")
 	for _, e := range events {
-		if e.text != "" {
+		switch {
+		case e.text != "":
 			h.typ(strings.ReplaceAll(e.text, "@ABS@", abs))
-		} else {
+		case e.update != nil:
+			h.send(updateMsg{*e.update})
+		case e.wait:
+			clk.t = clk.t.Add(updateGrace)
+		default:
 			h.key(e.key)
 		}
 		record(e.String())

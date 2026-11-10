@@ -1,14 +1,14 @@
 //go:build !windows
 
-package cli
+package selfupdate
 
 import (
 	"os"
 	"syscall"
 )
 
-// restartProcess replaces this process with exe, keeping its arguments,
+// Restart replaces this process with exe, keeping its arguments,
 // environment and terminal. It only returns on failure.
-func restartProcess(exe string) (int, error) {
+func Restart(exe string) (int, error) {
 	return 1, syscall.Exec(exe, os.Args, os.Environ())
 }
