@@ -32,7 +32,15 @@ type (
 		err error
 	}
 	spinnerTick struct{}
+	// updateMsg carries the result of the background update check: the
+	// newer version available, or "" if there is none.
+	updateMsg struct{ version string }
 )
+
+// updateGrace is how long keys are ignored after the update question pops
+// up, so a keystroke meant for the wizard (a "y" in a file name) does not
+// answer it.
+const updateGrace = 600 * time.Millisecond
 
 // Settings persists the user configuration (model.ConfigStore in production).
 type Settings interface {
@@ -47,6 +55,14 @@ type Setup struct {
 	Suggested string // proposal shown when no download directory is configured
 	Store     Settings
 	Plain     bool // ASCII-only glyphs and no color
+
+	// Version is the installed version, shown in the update question.
+	Version string
+	// CheckUpdate, if set, runs in the background when the wizard starts
+	// and returns a newer version available for download, or "".
+	CheckUpdate func() string
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
 }
 
 // Controller holds the wizard state.
@@ -64,6 +80,12 @@ type Controller struct {
 	dlReturn  view.Step // step to return to after the download directory screen
 	dlCancel  bool      // the download directory screen can be left with esc
 	dlReason  string
+
+	updateVersion  string    // newer version being offered
+	updatePending  string    // newer version found while busy, offered later
+	updateReturn   view.Step // step to return to when the update is declined
+	updateShown    time.Time // when the update question appeared
+	updateAccepted string    // version the user chose to install
 
 	matches []model.Format
 	sel     int
@@ -208,7 +230,58 @@ func newInput(placeholder string, plain bool) textinput.Model {
 	return ti
 }
 
-func (c *Controller) Init() tea.Cmd { return nil }
+// Init starts the background update check.
+func (c *Controller) Init() tea.Cmd {
+	check := c.setup.CheckUpdate
+	if check == nil {
+		return nil
+	}
+	return func() tea.Msg { return updateMsg{check()} }
+}
+
+// UpdateRequested returns the version the user chose to install from the
+// update question, or "" if none. The wizard has quit when it is set.
+func (c *Controller) UpdateRequested() string { return c.updateAccepted }
+
+func (c *Controller) now() time.Time {
+	if c.setup.Now != nil {
+		return c.setup.Now()
+	}
+	return time.Now()
+}
+
+// offerUpdate pops up the update question over the current step, or keeps
+// it for later while a file is being generated.
+func (c *Controller) offerUpdate(version string) {
+	if version == "" || c.updateVersion != "" {
+		return
+	}
+	if c.step == view.StepGenerating {
+		c.updatePending = version
+		return
+	}
+	c.updatePending = ""
+	c.updateVersion, c.updateReturn, c.updateShown = version, c.step, c.now()
+	errMsg, suggest := c.errMsg, c.suggest
+	c.goTo(view.StepUpdate)
+	c.errMsg, c.suggest = errMsg, suggest // restored when returning
+}
+
+func (c *Controller) updateUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if c.now().Sub(c.updateShown) < updateGrace {
+		return c, nil
+	}
+	switch {
+	case isKey(msg, "y"):
+		c.updateAccepted = c.updateVersion
+		return c, tea.Quit
+	case msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || isKey(msg, "n"):
+		errMsg, suggest := c.errMsg, c.suggest
+		c.goTo(c.updateReturn)
+		c.errMsg, c.suggest = errMsg, suggest
+	}
+	return c, nil
+}
 
 func (c *Controller) View() string { return view.Render(c.State()) }
 
@@ -223,14 +296,18 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		c.frame++
 		return c, tick()
+	case updateMsg:
+		c.offerUpdate(msg.version)
+		return c, nil
 	case generatedMsg:
 		if msg.err != nil {
 			c.goTo(c.backFromGenerate())
 			c.errMsg = msg.err.Error()
-			return c, nil
+		} else {
+			c.result = msg.res
+			c.step = view.StepDone
 		}
-		c.result = msg.res
-		c.step = view.StepDone
+		c.offerUpdate(c.updatePending)
 		return c, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -257,6 +334,8 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return c.updateConfirm(msg)
 		case view.StepDone:
 			return c.updateDone(msg)
+		case view.StepUpdate:
+			return c.updateUpdate(msg)
 		}
 	}
 	return c, nil
@@ -557,6 +636,7 @@ func (c *Controller) State() view.State {
 		Spinner:    c.spinner[c.frame%len(c.spinner)],
 		CurrentDir: c.setup.Current, DownloadDir: c.downloads, LocationYes: c.locYes,
 		DownloadReason: c.dlReason, DownloadCancel: c.dlCancel, EICAR: c.eicar, Plain: c.setup.Plain,
+		UpdateVersion: c.updateVersion, InstalledVersion: c.setup.Version,
 	}
 	if c.format.Ext != "" {
 		s.MinSize, s.MinBytes, s.SizeNote = model.HumanSize(c.format.Rule.Min), c.format.Rule.Min, c.format.Rule.Note

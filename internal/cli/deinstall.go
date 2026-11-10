@@ -60,7 +60,8 @@ func deinstall(stdin io.Reader, stdout, stderr io.Writer, cfgPath string) int {
 
 // deinstallTargets lists the paths to remove, in order: the configuration
 // directory (if present), a symlink the program was started through (if it
-// points to this executable) and the executable itself.
+// points to this executable), an executable left over from an update (if
+// present) and the executable itself.
 func deinstallTargets(cfgPath string) ([]string, error) {
 	var targets []string
 	if dir := filepath.Dir(cfgPath); model.Exists(dir) {
@@ -75,6 +76,10 @@ func deinstallTargets(cfgPath string) ([]string, error) {
 	}
 	if link := invokedLink(exe); link != "" {
 		targets = append(targets, link)
+	}
+	// An update on Windows leaves the replaced executable behind as exe.old.
+	if old := exe + ".old"; model.Exists(old) {
+		targets = append(targets, old)
 	}
 	return append(targets, exe), nil
 }

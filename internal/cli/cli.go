@@ -25,6 +25,9 @@ var startTUI = func(ctrl *controller.Controller) error {
 	return err
 }
 
+// checkUpdate looks for a newer release in the background; tests replace it.
+var checkUpdate = newerRelease
+
 // name prefixes usage and error messages.
 const name = view.Command
 
@@ -103,9 +106,15 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	suggested, _ := model.SuggestDownloadDir() // only a proposal for the setup screen
 	ctrl := controller.New(&model.Service{Registry: reg}, controller.Setup{
 		Current: cwd, Home: home, Suggested: suggested, Store: store, Plain: plainMode,
+		Version: Version, CheckUpdate: checkUpdate,
 	})
 	if err := startTUI(ctrl); err != nil {
 		return fail(err)
+	}
+	// The update question in the wizard closes it on yes; install now that
+	// the terminal is back to normal.
+	if v := ctrl.UpdateRequested(); v != "" {
+		return applyUpdate(v, stdout, stderr)
 	}
 	return 0
 }

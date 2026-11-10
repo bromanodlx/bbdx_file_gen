@@ -56,7 +56,7 @@ Up to 1.2.0 the tool was also installed as `bbdx_file_gen`; that name is gone, a
 the configuration (still under `bbdx_file_gen/`) carries over unchanged.
 
 Keys: `enter` next · `esc` back · `tab` complete the type, or apply the suggested size ·
-`↑/↓` choose a type · `y`/`n` (or `←/→` + `enter`) answer the location question · `ctrl+d` change the download directory · `ctrl+c` quit. Existing files are only replaced after a
+`↑/↓` choose a type · `y`/`n` (or `←/→` + `enter`) answer the location question · `ctrl+d` change the download directory · `ctrl+c` quit · on the update question `y` installs, `n`/`esc` continues. Existing files are only replaced after a
 `y/N` confirmation. Files are written to a temporary name and renamed into place,
 so an aborted run never leaves a partial file behind.
 
@@ -66,6 +66,29 @@ on automatically when `NO_COLOR` is set or `TERM=dumb`.
 
 Size units: `B`; `KB`/`MB`/`GB` = ×1000 (SI); `KiB`/`MiB`/`GiB` or `K`/`M`/`G` = ×1024 (IEC).
 Fractions are accepted when they come out to whole bytes (`1.5KiB` = 1536). The maximum is 1 GiB.
+
+### Updates
+
+When the wizard starts, `bbdxfg` checks GitHub for a newer release in the
+background, so the wizard is ready to use right away. If a newer version is
+found, the question *Update available: bbdxfg X is available (installed: Y).
+Install it now? [y/N]* pops up over the current step. Keys pressed in the first
+moment after it appears are ignored, so a `y` typed into a file name doesn't
+answer it by accident. If a file is being generated, the question waits until
+generation has finished.
+
+- `y` closes the wizard, downloads the release archive for your platform, verifies
+  it against the release's `checksums.txt`, puts it in place of the running
+  executable and starts the tool again with the new version.
+- `n`, `esc` or `enter` close the question and you continue where you were, with
+  all inputs intact. It is asked again at the next start.
+
+The check is silent when you are offline or already up to date. It doesn't run
+for `-list`, `-version`, `-download-dir` and `deinstall`, or when
+`BBDXFG_NO_UPDATE_CHECK` is set. If the update fails (e.g. the executable is in a
+directory you can't write to), the reason is shown and the installed version is
+left untouched. On Windows the replaced executable is kept as `bbdxfg.exe.old`
+and removed by the next update or by `deinstall`.
 
 ### Deinstall
 

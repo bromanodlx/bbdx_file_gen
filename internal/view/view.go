@@ -30,6 +30,9 @@ const (
 	// StepDownloadDir is the settings screen for the standard download
 	// directory; it is not one of the numbered wizard steps.
 	StepDownloadDir
+	// StepUpdate asks whether to install a newer release; it pops up over
+	// whatever step was active when the background check found one.
+	StepUpdate
 )
 
 // Suggestion is one entry of the file type list.
@@ -66,6 +69,9 @@ type State struct {
 	DownloadCancel bool   // esc returns instead of quitting
 
 	EICAR bool // the file is an EICAR anti-malware test file
+
+	UpdateVersion    string // newer release offered in the update question
+	InstalledVersion string
 
 	SizeLabel string // human readable size of the file being/just generated
 	Bytes     int64
@@ -144,20 +150,21 @@ type glyphs struct {
 	bar, done, active, pending   string // headings and the progress rail
 	sel, warn, gear, arrow, hint string // markers
 	sep, dash, ell               string // middle dot, em dash, truncation tail
+	up                           string // update marker
 }
 
 var unicodeGlyphs = glyphs{
 	tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│",
 	bar: "▍", done: "✓", active: "●", pending: "○",
 	sel: "▸", warn: "⚠", gear: "⚙", arrow: "→", hint: "➜",
-	sep: "·", dash: "—", ell: "…",
+	sep: "·", dash: "—", ell: "…", up: "⬆",
 }
 
 var asciiGlyphs = glyphs{
 	tl: "+", tr: "+", bl: "+", br: "+", h: "-", v: "|",
 	bar: "|", done: "v", active: "*", pending: "o",
 	sel: ">", warn: "!", gear: "*", arrow: "->", hint: "->",
-	sep: "-", dash: "-", ell: "...",
+	sep: "-", dash: "-", ell: "...", up: "^",
 }
 
 // Render draws the whole screen.
@@ -171,9 +178,12 @@ func Render(s State) string {
 	inner := total - 4 // two border cells and one space of padding per side
 
 	body := bannerBlock(inner, g)
-	if s.Step == StepDownloadDir {
+	switch s.Step {
+	case StepDownloadDir:
 		body = append(body, activeSt.Render(g.gear+"  Settings"))
-	} else {
+	case StepUpdate:
+		body = append(body, activeSt.Render(g.up+"  Update"))
+	default:
 		body = append(body, rail(s.Step, inner, g))
 	}
 	body = append(body, "")
@@ -228,6 +238,15 @@ func section(s State, inner int, g glyphs) []string {
 			mutedSt.Render("Paths work like in bash: absolute (/data/dl), relative to the"),
 			mutedSt.Render("current directory (../dl), ~, $VARIABLES, quotes and \\ escapes."),
 		)
+	case StepUpdate:
+		return []string{
+			heading("Update available", "", g),
+			fmt.Sprintf("%s %s is available (installed: %s).", Command, extSt.Render(s.UpdateVersion), s.InstalledVersion),
+			"",
+			"Install it now?  " + activeSt.Render("[y/N]"),
+			mutedSt.Render("Yes closes " + Command + ", installs the update and starts it again."),
+			mutedSt.Render("No continues where you were; you'll be asked again next start."),
+		}
 	case StepName:
 		return []string{
 			heading("File name", "", g),
@@ -406,6 +425,8 @@ func helpItems(s State) []string {
 		return []string{"y/n answer", lr, "enter confirm", "esc back", dl, "ctrl+c quit"}
 	case StepConfirm:
 		return []string{"y overwrite", "n/esc back"}
+	case StepUpdate:
+		return []string{"y install & restart", "n/esc later", "ctrl+c quit"}
 	case StepGenerating:
 		return []string{wait}
 	case StepDownloadDir:
